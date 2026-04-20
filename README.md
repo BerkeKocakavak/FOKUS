@@ -9,6 +9,7 @@
 ## Gereksinimler
 - Python 3.12.9
 - .NET 10.0
+- .NET SDK
 
 ## Kurulum
 
@@ -24,8 +25,15 @@ pip install -r requirements.txt
 python kamera_test.py
 ```
 
+## Pipe (C#) tarafı
+```bash
+cd KararMotoru
+dotnet run
+```
+
 ## Modüller
 - `kamera_test.py` — Biyometrik analiz modülü (Berke)
+- `KararMotoru` — Arkaplan ve odak analiz modülü (Türkay)
 
 ## Notlar
 - İlk çalıştırmada `face_landmarker.task` modeli otomatik indirilir (~30MB)

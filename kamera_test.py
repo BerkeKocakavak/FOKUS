@@ -279,6 +279,26 @@ while True:
             cv2.putText(frame, pipe_durum, (20, 160),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, pipe_renk, 2)
 
+            # EKLENEN KISIM: Gerçek Odak Puanını C#'ın oluşturduğu dosyadan oku
+            odak_puani = 100
+            try:
+                if os.path.exists("aktif_odak.txt"):
+                    with open("aktif_odak.txt", "r") as f:
+                        odak_puani = int(f.read().strip())
+            except:
+                pass # Dosya o an yazılıyorsa (kilitliyse) hatayı yoksay, eski puanı göster
+
+            # Puana göre renk belirle (BGR formatında)
+            if odak_puani > 70:
+                puan_renk = (0, 255, 0) # Yeşil
+            elif odak_puani > 40:
+                puan_renk = (0, 255, 255) # Sarı
+            else:
+                puan_renk = (0, 0, 255) # Kırmızı
+
+            cv2.putText(frame, f"ODAK PUANI: {odak_puani} / 100", (20, 200),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.9, puan_renk, 2)
+
     else:
         with veri_kilidi:
             paylasilan_veri.update({"yuz_var": False, "zaman": time.time()})
