@@ -7,6 +7,9 @@ import os
 import time
 import json
 import threading
+import atexit
+import shutil
+import subprocess
 import win32pipe
 import win32file
 import pywintypes
@@ -25,6 +28,9 @@ SAG_KULAK = 454
 KIRPMA_KARE = 2
 KALIBRASYON_SURE = 3
 PIPE_ADI = r'\\.\pipe\fokus_pipe'
+KOK_DIZIN = os.path.dirname(os.path.abspath(__file__))
+KARAR_MOTORU_PROJE = os.path.join(KOK_DIZIN, "KararMotoru", "KararMotoru.csproj")
+KARAR_MOTORU_LOG = os.path.join(KOK_DIZIN, "karar_motoru.log")
 
 # Kalibrasyon değerleri
 kalibrasyon_tamam = False
@@ -46,11 +52,84 @@ kal_baslangic = None
 paylasilan_veri = {}
 veri_kilidi = threading.Lock()
 pipe_bagli = False
+karar_motoru_proc = None
+karar_motoru_log = None
+
+def karar_motoru_zaten_calisiyor():
+    try:
+        cikti = subprocess.check_output(
+            ["tasklist", "/FI", "IMAGENAME eq KararMotoru.exe", "/NH"],
+            text=True,
+            encoding="utf-8",
+            errors="ignore"
+        )
+        return "KararMotoru.exe" in cikti
+    except Exception:
+        return False
+
+def karar_motoru_baslat():
+    global karar_motoru_proc, karar_motoru_log
+
+    if os.environ.get("FOKUS_KARAR_MOTORU_OTOMATIK", "1") == "0":
+        print("Karar motoru otomatik baslatma kapali.")
+        return None
+
+    if karar_motoru_zaten_calisiyor():
+        print("Karar motoru zaten calisiyor, mevcut surece baglanilacak.")
+        return None
+
+    dotnet = shutil.which("dotnet")
+    if dotnet is None:
+        print("dotnet bulunamadi. Karar motorunu otomatik baslatamiyorum.")
+        return None
+
+    if not os.path.exists(KARAR_MOTORU_PROJE):
+        print(f"Karar motoru projesi bulunamadi: {KARAR_MOTORU_PROJE}")
+        return None
+
+    try:
+        karar_motoru_log = open(KARAR_MOTORU_LOG, "w", encoding="utf-8")
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        karar_motoru_proc = subprocess.Popen(
+            [dotnet, "run", "--project", KARAR_MOTORU_PROJE],
+            cwd=KOK_DIZIN,
+            stdout=karar_motoru_log,
+            stderr=subprocess.STDOUT,
+            creationflags=creationflags
+        )
+        print("Karar motoru otomatik baslatildi.")
+        print(f"Karar motoru log dosyasi: {KARAR_MOTORU_LOG}")
+        return karar_motoru_proc
+    except Exception as e:
+        print(f"Karar motoru baslatilamadi: {e}")
+        if karar_motoru_log:
+            karar_motoru_log.close()
+            karar_motoru_log = None
+        return None
+
+def karar_motoru_durdur():
+    global karar_motoru_proc, karar_motoru_log
+
+    if karar_motoru_proc is not None and karar_motoru_proc.poll() is None:
+        karar_motoru_proc.terminate()
+        try:
+            karar_motoru_proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            karar_motoru_proc.kill()
+
+    karar_motoru_proc = None
+
+    if karar_motoru_log is not None:
+        karar_motoru_log.close()
+        karar_motoru_log = None
+
+atexit.register(karar_motoru_durdur)
 
 def pipe_sunucusu():
     global pipe_bagli
     print("Pipe sunucusu baslatılıyor...")
     while True:
+        pipe = None
         try:
             pipe = win32pipe.CreateNamedPipe(
                 PIPE_ADI,
@@ -73,14 +152,19 @@ def pipe_sunucusu():
                         win32file.WriteFile(pipe, mesaj.encode('utf-8'))
                     except pywintypes.error:
                         print("Baglanti kesildi, yeniden bekleniyor...")
-                        pipe_bagli = False
                         break
 
                 time.sleep(0.1)
 
         except Exception as e:
             print(f"Pipe hatasi: {e}")
+        finally:
             pipe_bagli = False
+            if pipe is not None:
+                try:
+                    win32file.CloseHandle(pipe)
+                except Exception:
+                    pass
             time.sleep(1)
 
 def ear_hesapla(landmarks, goz_noktalari, w, h):
@@ -156,6 +240,7 @@ cap = cv2.VideoCapture(0)
 # Pipe sunucusunu ayrı thread'de başlat
 pipe_thread = threading.Thread(target=pipe_sunucusu, daemon=True)
 pipe_thread.start()
+karar_motoru_baslat()
 
 while True:
     ret, frame = cap.read()
@@ -311,3 +396,4 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+karar_motoru_durdur()

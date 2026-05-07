@@ -1,195 +1,182 @@
-﻿using System;
-using System.Diagnostics;
-using System.IO;
 using System.IO.Pipes;
+using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
+using FokusKararMotoru.Models;
+using FokusKararMotoru.Services;
 
-namespace FokusKararMotoru
+namespace FokusKararMotoru;
+
+internal static class Program
 {
-    public class BiyometrikVeri
-    {
-        public double zaman { get; set; }
-        public double ear { get; set; }
-        public double ear_esik { get; set; }
-        public double gaze { get; set; }
-        public double gaze_sapma { get; set; }
-        public double one_sapma { get; set; }
-        public double yana_sapma { get; set; }
-        public int kirpma_sayisi { get; set; }
-        public bool yuz_var { get; set; }
-    }
+    private const string PipeName = "fokus_pipe";
+    private static DateTimeOffset _sonYonlendirilmisCikti = DateTimeOffset.MinValue;
 
-    class Program
+    private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        // YENİ KARA LİSTE:
-        static readonly string[] KaraListe = {
-            "steam", "Discord", "EpicGamesLauncher", "Spotify",
-            "EADesktop", // EA App
-            "upc",       // Ubisoft Connect
-            "XboxApp"    // XBOX Uygulaması
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static async Task<int> Main(string[] args)
+    {
+        Console.OutputEncoding = Encoding.UTF8;
+
+        if (args.Any(arg => arg.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
+        {
+            return SelfTest.Run();
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            cancellation.Cancel();
         };
 
-        static string aktifYasakliUygulama = "Yok";
+        string projeKoku = ProjeYolu.Bul();
+        KararMotoruAyarlari ayarlar = AyarDeposu.YukleVeyaOlustur(projeKoku);
 
-        static async Task Main(string[] args)
+        using var girdiIzleyici = new GirdiIzleyici(ayarlar.GirdiOrneklemeMs);
+        var surecTarayici = new SurecTarayici();
+        var odakMotoru = new OdakPuaniMotoru();
+        var durumYazici = new DurumYazici(projeKoku);
+
+        Console.WriteLine("FOKUS Karar Motoru başlatıldı.");
+        Console.WriteLine($"Ayar dosyası: {AyarDeposu.AyarDosyasiYolu(projeKoku)}");
+        Console.WriteLine("Python pipe bağlantısı bekleniyor...");
+
+        while (!cancellation.IsCancellationRequested)
         {
-            Console.WriteLine("FOKUS Karar Motoru Başlatılıyor...");
-            Console.WriteLine("Python Pipe'ına bağlanılması bekleniyor...");
-
-            using (var client = new NamedPipeClientStream(".", "fokus_pipe", PipeDirection.In))
+            try
             {
-                try
-                {
-                    await client.ConnectAsync();
-
-                    using (var reader = new StreamReader(client))
-                    {
-                        while (client.IsConnected)
-                        {
-                            string jsonVeri = await reader.ReadLineAsync();
-                            if (!string.IsNullOrEmpty(jsonVeri))
-                            {
-                                try
-                                {
-                                    BiyometrikVeri veri = JsonSerializer.Deserialize<BiyometrikVeri>(jsonVeri);
-
-                                    int arkaPlanCezasi = KaraListeKontrol();
-                                    int odakPuani = OdakPuaniHesapla(veri, arkaPlanCezasi);
-
-                                    // YENİ EKLENEN KISIM: Gerçek Puanı Python'ın okuması için txt'ye yazıyoruz
-                                    // (..\ diyerek bir üst klasöre, yani FOKUS-main içine kaydediyoruz)
-                                    File.WriteAllText(@"..\aktif_odak.txt", odakPuani.ToString());
-
-                                    Console.SetCursorPosition(0, 0);
-                                    Console.WriteLine("================ FOKUS KARAR MOTORU ================");
-                                    Console.WriteLine($"Durum:           {(veri.yuz_var ? "Kullanıcı Ekran Başında" : "KULLANICI YOK!").PadRight(30)}");
-                                    Console.WriteLine($"Göz Kırpma:      {veri.kirpma_sayisi.ToString().PadRight(30)}");
-                                    Console.WriteLine($"Baş Eğimi:       (Öne: {veri.one_sapma}, Yana: {veri.yana_sapma})".PadRight(40));
-
-                                    Console.Write("Arka Plan Tespit: ");
-                                    if (aktifYasakliUygulama != "Yok") Console.ForegroundColor = ConsoleColor.Red;
-                                    Console.WriteLine(aktifYasakliUygulama.PadRight(50));
-                                    Console.ResetColor();
-
-                                    Console.WriteLine("----------------------------------------------------");
-                                    Console.Write("ANLIK ODAK PUANI: ");
-                                    if (odakPuani > 70) Console.ForegroundColor = ConsoleColor.Green;
-                                    else if (odakPuani > 40) Console.ForegroundColor = ConsoleColor.Yellow;
-                                    else Console.ForegroundColor = ConsoleColor.Red;
-
-                                    Console.WriteLine($"{odakPuani} / 100".PadRight(20));
-                                    Console.ResetColor();
-                                    Console.WriteLine("====================================================");
-                                }
-                                catch (JsonException) { }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex) { Console.WriteLine($"Hata oluştu: {ex.Message}"); }
+                await PipeDongusu(ayarlar, girdiIzleyici, surecTarayici, odakMotoru, durumYazici, cancellation.Token);
+            }
+            catch (TimeoutException)
+            {
+                Console.WriteLine("Pipe henüz hazır değil; tekrar denenecek.");
+                await Task.Delay(1000, cancellation.Token);
+            }
+            catch (IOException ex)
+            {
+                Console.WriteLine($"Pipe bağlantısı kesildi: {ex.Message}");
+                await Task.Delay(1000, cancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
         }
 
-        // GÜNCELLENMİŞ KONTROL: 
-        static int KaraListeKontrol()
+        Console.WriteLine("Karar motoru durduruldu.");
+        return 0;
+    }
+
+    private static async Task PipeDongusu(
+        KararMotoruAyarlari ayarlar,
+        GirdiIzleyici girdiIzleyici,
+        SurecTarayici surecTarayici,
+        OdakPuaniMotoru odakMotoru,
+        DurumYazici durumYazici,
+        CancellationToken cancellationToken)
+    {
+        using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.In, PipeOptions.Asynchronous);
+        await client.ConnectAsync(ayarlar.PipeBaglantiZamanAsimiMs, cancellationToken);
+
+        using var reader = new StreamReader(client, Encoding.UTF8);
+        Console.WriteLine("Python pipe bağlantısı kuruldu.");
+
+        while (client.IsConnected && !cancellationToken.IsCancellationRequested)
         {
-            int ceza = 0;
-            System.Collections.Generic.List<string> acikUygulamalar = new System.Collections.Generic.List<string>();
-
-            foreach (var uygulama in KaraListe)
+            string? jsonVeri = await reader.ReadLineAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(jsonVeri))
             {
-                var processes = Process.GetProcessesByName(uygulama);
-
-                foreach (var proc in processes)
-                {
-                    // SİHİRLİ DOKUNUŞ 2.0: Sadece Handle (Pencere Kimliği) yeterli. 
-                    // Title kontrolünü kaldırdık ki Steam gizlenemesin!
-                    if (proc.MainWindowHandle != IntPtr.Zero)
-                    {
-                        if (!acikUygulamalar.Contains(uygulama))
-                        {
-                            acikUygulamalar.Add(uygulama);
-                        }
-                        break;
-                    }
-                }
+                continue;
             }
 
-            int count = acikUygulamalar.Count;
-            if (count > 0)
+            BiyometrikVeri? veri;
+            try
             {
-                if (count == 1) ceza = 30;
-                else if (count == 2) ceza = 50;
-                else if (count == 3) ceza = 65;
-                else if (count == 4) ceza = 75;
-                else if (count == 5) ceza = 90;
-                else if (count >= 6) ceza = 100;
-
-                aktifYasakliUygulama = $"{count} Uygulama ({string.Join(", ", acikUygulamalar)}) [CEZA: -{ceza}]";
+                veri = JsonSerializer.Deserialize<BiyometrikVeri>(jsonVeri, JsonOptions);
             }
-            else
+            catch (JsonException ex)
             {
-                aktifYasakliUygulama = "Yok";
+                Console.WriteLine($"Geçersiz biyometrik veri atlandı: {ex.Message}");
+                continue;
             }
 
-            return ceza;
+            if (veri is null)
+            {
+                continue;
+            }
+
+            GirdiAktiviteOzeti girdiOzeti = girdiIzleyici.OzetAl(ayarlar.AktivitePenceresiSaniye);
+            SurecTaramaSonucu surecSonucu = surecTarayici.Tara(ayarlar);
+            OdakSonucu odakSonucu = odakMotoru.Hesapla(veri, girdiOzeti, surecSonucu, ayarlar);
+
+            durumYazici.Yaz(odakSonucu, veri, girdiOzeti, surecSonucu);
+            KonsolaYaz(veri, girdiOzeti, surecSonucu, odakSonucu, ayarlar);
+        }
+    }
+
+    private static void KonsolaYaz(
+        BiyometrikVeri veri,
+        GirdiAktiviteOzeti girdi,
+        SurecTaramaSonucu surec,
+        OdakSonucu odak,
+        KararMotoruAyarlari ayarlar)
+    {
+        if (Console.IsOutputRedirected)
+        {
+            DateTimeOffset simdi = DateTimeOffset.Now;
+            if ((simdi - _sonYonlendirilmisCikti).TotalSeconds < 2)
+            {
+                return;
+            }
+
+            _sonYonlendirilmisCikti = simdi;
+            Console.WriteLine(
+                $"{simdi:HH:mm:ss} | Odak {odak.Puan}/100 | Yüz: {(veri.YuzVar ? "var" : "yok")} | Kara liste: {surec.KaraListeOzeti} | Cezalar: {odak.CezaOzeti}");
+            return;
         }
 
-        // EMA Algoritması için geçmiş puanı hafızada tutmamız lazım
-        static double oncekiPuan = 100.0;
-
-        // FOKUS V2.0 Karmaşık ve Pürüzsüz Odak Algoritması
-        static int OdakPuaniHesapla(BiyometrikVeri veri, int arkaPlanCezasi)
+        if (!Console.IsOutputRedirected)
         {
-            if (!veri.yuz_var)
+            try
             {
-                // Yüz kameradan çıkarsa anında 0'a çakılmasın, hızla azalsın (Eriyerek bitsin)
-                oncekiPuan = Math.Max(0, oncekiPuan - 5.0);
-                return (int)oncekiPuan;
+                Console.SetCursorPosition(0, 0);
             }
-
-            double anlikHedef = 100.0;
-
-            // 1. GÖZ KIRPMA / UYUKLAMA MATEMATİĞİ (Max -25 Puan)
-            if (veri.ear < veri.ear_esik)
+            catch (IOException)
             {
-                // Eşiğin ne kadar altına düştüğüne bağlı oransal ceza (Göz ne kadar kapalıysa o kadar ceza)
-                double fark = veri.ear_esik - veri.ear;
-                anlikHedef -= Math.Min(25, fark * 200);
+                // Bazı terminaller imleç konumlandırmayı desteklemeyebilir.
             }
-
-            // 2. BAKIŞ (GAZE) SİYMETRİSİ MATEMATİĞİ (Max -30 Puan)
-            double gazeSapma = Math.Abs(veri.gaze_sapma);
-            if (gazeSapma > 0.01)
-            {
-                // Ekrana bakmıyorsa, merkezden uzaklaştıkça artan ceza
-                anlikHedef -= Math.Min(30, gazeSapma * 400);
-            }
-
-            // 3. POSTÜR / DURUŞ BOZUKLUĞU MATEMATİĞİ (Max -20 Puan)
-            // Öklid uzaklığı ile toplam sapma vektörünü buluyoruz
-            double posturSapma = Math.Sqrt(Math.Pow(veri.one_sapma, 2) + Math.Pow(veri.yana_sapma, 2));
-            if (posturSapma > 8)
-            {
-                anlikHedef -= Math.Min(20, (posturSapma - 8) * 0.8);
-            }
-
-            // 4. KARA LİSTE OTORİTESİ (En ağır darbe)
-            anlikHedef -= arkaPlanCezasi;
-
-            // Hedef puanı 0-100 arasına kilitle
-            anlikHedef = Math.Max(0, Math.Min(100, anlikHedef));
-
-            // 5. ÜSTEL HAREKETLİ ORTALAMA (EMA) - Pürüzsüzleştirme Motoru
-            // alpha = 0.15 demek: Puanın %15'i anlık durumdan, %85'i geçmiş durumdan gelir. Titremeyi yok eder!
-            double alpha = 0.15;
-            double pürüzsüzPuan = (alpha * anlikHedef) + ((1.0 - alpha) * oncekiPuan);
-
-            // Gelecek döngü için hafızayı güncelle
-            oncekiPuan = pürüzsüzPuan;
-
-            return (int)pürüzsüzPuan;
         }
+
+        Console.WriteLine("================ FOKUS KARAR MOTORU ================".PadRight(90));
+        Console.WriteLine($"Durum:              {(veri.YuzVar ? "Kullanıcı ekran başında" : "KULLANICI YOK").PadRight(55)}");
+        Console.WriteLine($"Odak eşiği:         {ayarlar.OdakEsigi}".PadRight(90));
+        Console.WriteLine($"Göz kırpma:         {veri.KirpmaSayisi}".PadRight(90));
+        Console.WriteLine($"Baş eğimi:          Öne {veri.OneSapma:0.0}, Yana {veri.YanaSapma:0.0}".PadRight(90));
+        Console.WriteLine($"Girdi izleme:       {girdi.TusDakika:0.0} tuş/dk, {girdi.FarePikselDakika:0} px/dk, boşta {girdi.HareketsizSaniye:0}s".PadRight(90));
+        Console.WriteLine($"Ön plan süreç:      {(surec.OnPlanSurec ?? "Bilinmiyor")}".PadRight(90));
+        Console.WriteLine($"Kara liste:         {surec.KaraListeOzeti}".PadRight(90));
+        Console.WriteLine("----------------------------------------------------".PadRight(90));
+        Console.Write("ANLIK ODAK PUANI:   ");
+
+        ConsoleColor eskiRenk = Console.ForegroundColor;
+        Console.ForegroundColor = odak.Puan switch
+        {
+            >= 70 => ConsoleColor.Green,
+            >= 40 => ConsoleColor.Yellow,
+            _ => ConsoleColor.Red
+        };
+        Console.WriteLine($"{odak.Puan} / 100".PadRight(70));
+        Console.ForegroundColor = eskiRenk;
+
+        string karar = odak.MudahaleGerekli
+            ? "Müdahale gerekli: kara listedeki süreçler için SY modülüne komut üretilebilir."
+            : "Müdahale gerekmiyor.";
+
+        Console.WriteLine($"Karar:              {karar}".PadRight(90));
+        Console.WriteLine($"Cezalar:            {odak.CezaOzeti}".PadRight(90));
+        Console.WriteLine("====================================================".PadRight(90));
     }
 }

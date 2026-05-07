@@ -1,3 +1,11 @@
 venv/ 
 face_landmarker.task 
 .vs/
+__pycache__/
+karar_motoru.log
+karar_motoru_ayarlar.json
+karar_motoru_durum.json
+KararMotoru/codex_bin/
+KararMotoru/codex_obj/
+KararMotoru/bin/
+KararMotoru/obj/

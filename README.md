@@ -24,8 +24,10 @@ pip install -r requirements.txt
 ```bash
 python kamera_test.py
 ```
+Bu komut kamera modülünü açar ve C# karar motorunu arka planda otomatik başlatır.
 
-## Pipe (C#) tarafı
+## Pipe (C#) tarafı - Manuel
+Normal kullanımda gerekmez. Karar motorunu tek başına test etmek isterseniz:
 ```bash
 cd KararMotoru
 dotnet run
@@ -33,7 +35,7 @@ dotnet run
 
 ## Modüller
 - `kamera_test.py` — Biyometrik analiz modülü (Berke)
-- `KararMotoru` — Arkaplan ve odak analiz modülü (Türkay)
+- `KararMotoru` — Karar motoru, girdi izleme ve odak analiz modülü (Batuhan Sami)
 
 ## Notlar
 - İlk çalıştırmada `face_landmarker.task` modeli otomatik indirilir (~30MB)
