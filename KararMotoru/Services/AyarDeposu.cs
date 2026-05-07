@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using FokusKararMotoru.Models;
@@ -45,5 +46,11 @@ public static class AyarDeposu
 
         ayarlar.Normalize();
         return ayarlar;
+    }
+
+    public static void Kaydet(string projeKoku, KararMotoruAyarlari ayarlar)
+    {
+        ayarlar.Normalize();
+        File.WriteAllText(AyarDosyasiYolu(projeKoku), JsonSerializer.Serialize(ayarlar, JsonOptions));
     }
 }

@@ -3,6 +3,7 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import numpy as np
+import argparse
 import os
 import time
 import json
@@ -31,6 +32,13 @@ PIPE_ADI = r'\\.\pipe\fokus_pipe'
 KOK_DIZIN = os.path.dirname(os.path.abspath(__file__))
 KARAR_MOTORU_PROJE = os.path.join(KOK_DIZIN, "KararMotoru", "KararMotoru.csproj")
 KARAR_MOTORU_LOG = os.path.join(KOK_DIZIN, "karar_motoru.log")
+HEADLESS = False
+FRAME_OUTPUT = None
+FRAME_INTERVAL = 1 / 30
+ANALIZ_INTERVAL = 1 / 10
+son_frame_yazma = 0.0
+son_analiz_zamani = 0.0
+son_result = None
 
 # Kalibrasyon değerleri
 kalibrasyon_tamam = False
@@ -55,6 +63,47 @@ pipe_bagli = False
 karar_motoru_proc = None
 karar_motoru_log = None
 
+def argumanlari_oku():
+    parser = argparse.ArgumentParser(description="FOKUS kamera ve pipe isçisi")
+    parser.add_argument("--headless", action="store_true", help="OpenCV penceresi acmadan calisir.")
+    parser.add_argument("--frame-output", help="Son kamera karesini atomik JPEG olarak bu yola yazar.")
+    parser.add_argument("--pipe-name", default="fokus_pipe", help="Named pipe adi veya tam pipe yolu.")
+    parser.add_argument("--preview-fps", type=float, default=30, help="WPF onizleme JPEG yazma hizi.")
+    parser.add_argument("--analysis-fps", type=float, default=10, help="MediaPipe analiz hizi.")
+    return parser.parse_args()
+
+def frame_yaz(frame):
+    global son_frame_yazma
+
+    if not FRAME_OUTPUT:
+        return
+
+    simdi = time.time()
+    if simdi - son_frame_yazma < FRAME_INTERVAL:
+        return
+
+    tmp_yol = f"{FRAME_OUTPUT}.{os.getpid()}.tmp"
+    try:
+        klasor = os.path.dirname(os.path.abspath(FRAME_OUTPUT))
+        if klasor:
+            os.makedirs(klasor, exist_ok=True)
+
+        basarili, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+        if not basarili:
+            return
+
+        with open(tmp_yol, "wb") as dosya:
+            dosya.write(buffer.tobytes())
+        os.replace(tmp_yol, FRAME_OUTPUT)
+        son_frame_yazma = simdi
+    except Exception as e:
+        print(f"Kamera karesi yazilamadi: {e}")
+        try:
+            if os.path.exists(tmp_yol):
+                os.remove(tmp_yol)
+        except Exception:
+            pass
+
 def karar_motoru_zaten_calisiyor():
     try:
         cikti = subprocess.check_output(
@@ -70,7 +119,7 @@ def karar_motoru_zaten_calisiyor():
 def karar_motoru_baslat():
     global karar_motoru_proc, karar_motoru_log
 
-    if os.environ.get("FOKUS_KARAR_MOTORU_OTOMATIK", "1") == "0":
+    if os.environ.get("FOKUS_KARAR_MOTORU_OTOMATIK", "0") != "1":
         print("Karar motoru otomatik baslatma kapali.")
         return None
 
@@ -138,7 +187,13 @@ def pipe_sunucusu():
                 1, 65536, 65536, 0, None
             )
             print("C# istemcisi bekleniyor...")
-            win32pipe.ConnectNamedPipe(pipe, None)
+            try:
+                win32pipe.ConnectNamedPipe(pipe, None)
+            except pywintypes.error as e:
+                hata_kodu = getattr(e, "winerror", e.args[0] if e.args else None)
+                if hata_kodu != 535:  # ERROR_PIPE_CONNECTED
+                    raise
+
             pipe_bagli = True
             print("C# baglandi!")
 
@@ -216,6 +271,23 @@ except ImportError:
     os.system("pip install pywin32")
     import win32pipe
 
+args = argumanlari_oku()
+HEADLESS = args.headless
+FRAME_OUTPUT = args.frame_output
+PIPE_ADI = args.pipe_name if args.pipe_name.startswith("\\\\.\\pipe\\") else rf'\\.\pipe\{args.pipe_name}'
+FRAME_INTERVAL = 1 / max(args.preview_fps, 1)
+ANALIZ_INTERVAL = 1 / max(args.analysis_fps, 1)
+if HEADLESS:
+    print("Headless kamera modu aktif.")
+if FRAME_OUTPUT:
+    print(f"Kamera karesi yazilacak: {FRAME_OUTPUT}")
+print(f"Pipe adi: {PIPE_ADI}")
+print(f"Onizleme FPS: {args.preview_fps:.0f}, analiz FPS: {args.analysis_fps:.0f}")
+
+# Pipe sunucusunu model/kamera yuklenmeden once ac. C# istemcisi erken baglanabilsin.
+pipe_thread = threading.Thread(target=pipe_sunucusu, daemon=True)
+pipe_thread.start()
+
 model_path = "face_landmarker.task"
 if not os.path.exists(model_path):
     import urllib.request
@@ -236,10 +308,10 @@ options = vision.FaceLandmarkerOptions(
 
 detector = vision.FaceLandmarker.create_from_options(options)
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+cap.set(cv2.CAP_PROP_FPS, 30)
 
-# Pipe sunucusunu ayrı thread'de başlat
-pipe_thread = threading.Thread(target=pipe_sunucusu, daemon=True)
-pipe_thread.start()
 karar_motoru_baslat()
 
 while True:
@@ -248,12 +320,17 @@ while True:
         break
 
     h, w, _ = frame.shape
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    result = detector.detect(mp_image)
+    simdi = time.time()
+    if simdi - son_analiz_zamani >= ANALIZ_INTERVAL:
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        son_result = detector.detect(mp_image)
+        son_analiz_zamani = simdi
+
+    result = son_result
     frame = cv2.flip(frame, 1)
 
-    if result.face_landmarks:
+    if result and result.face_landmarks:
         landmarks = result.face_landmarks[0]
 
         sol_ear = ear_hesapla(landmarks, SOL_GOZ, w, h)
@@ -390,10 +467,14 @@ while True:
         cv2.putText(frame, "Yuz Bulunamadi", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-    cv2.imshow("FOKUS - Postur Analizi", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    frame_yaz(frame)
+
+    if not HEADLESS:
+        cv2.imshow("FOKUS - Postur Analizi", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
 cap.release()
-cv2.destroyAllWindows()
+if not HEADLESS:
+    cv2.destroyAllWindows()
 karar_motoru_durdur()

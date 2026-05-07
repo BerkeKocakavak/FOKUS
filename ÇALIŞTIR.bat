@@ -1,0 +1,1 @@
+dotnet run --project .\KararMotoru\KararMotoru.csproj

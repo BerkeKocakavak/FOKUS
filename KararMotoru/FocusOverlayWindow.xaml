@@ -1,0 +1,46 @@
+<Window x:Class="FokusKararMotoru.FocusOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="132"
+        Height="76"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Loaded="Window_Loaded"
+        MouseLeftButtonUp="Window_MouseLeftButtonUp">
+    <Border x:Name="RootBorder"
+            CornerRadius="8"
+            Background="#F8FAFC"
+            BorderBrush="#CBD5E1"
+            BorderThickness="1"
+            Padding="12,8">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Ellipse x:Name="StatusDot"
+                     Width="10"
+                     Height="10"
+                     Margin="0,8,10,0"
+                     VerticalAlignment="Top"
+                     Fill="#0F766E"/>
+            <StackPanel Grid.Column="1">
+                <TextBlock x:Name="ScoreText"
+                           Text="--"
+                           FontSize="30"
+                           FontWeight="Bold"
+                           LineHeight="32"
+                           Foreground="#172033"/>
+                <TextBlock x:Name="DetailText"
+                           Text="Bekleniyor"
+                           FontSize="11"
+                           Foreground="#647089"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>
