@@ -11,6 +11,9 @@ internal static class Program
     private const string PipeName = "fokus_pipe";
     private static DateTimeOffset _sonYonlendirilmisCikti = DateTimeOffset.MinValue;
 
+    // FOKUS-SY: Hasan Gürses sorumluluğundaki süreç yöneticisi modülü
+    private static readonly SurecYonetici _surecYonetici = new();
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -58,6 +61,8 @@ internal static class Program
             catch (IOException ex)
             {
                 Console.WriteLine($"Pipe bağlantısı kesildi: {ex.Message}");
+                // Bağlantı koptuğunda emniyet gereği kısıtlamaları kaldır (Fail-Safe)
+                _surecYonetici.SurecleriDevamEttir(ayarlar.KaraListe);
                 await Task.Delay(1000, cancellation.Token);
             }
             catch (OperationCanceledException)
@@ -87,10 +92,7 @@ internal static class Program
         while (client.IsConnected && !cancellationToken.IsCancellationRequested)
         {
             string? jsonVeri = await reader.ReadLineAsync(cancellationToken);
-            if (string.IsNullOrWhiteSpace(jsonVeri))
-            {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(jsonVeri)) continue;
 
             BiyometrikVeri? veri;
             try
@@ -103,14 +105,23 @@ internal static class Program
                 continue;
             }
 
-            if (veri is null)
-            {
-                continue;
-            }
+            if (veri is null) continue;
 
             GirdiAktiviteOzeti girdiOzeti = girdiIzleyici.OzetAl(ayarlar.AktivitePenceresiSaniye);
             SurecTaramaSonucu surecSonucu = surecTarayici.Tara(ayarlar);
             OdakSonucu odakSonucu = odakMotoru.Hesapla(veri, girdiOzeti, surecSonucu, ayarlar);
+
+            // MÜDAHALE MEKANİZMASI: Hasan'ın modülü (SY) burada tetikleniyor
+            if (odakSonucu.MudahaleGerekli)
+            {
+                // Kara listedeki süreçleri askıya al
+                _surecYonetici.SurecleriDondur(surecSonucu.KaraListedekiSurecler);
+            }
+            else if (surecSonucu.KaraListedekiSurecler.Any())
+            {
+                // Odak normale döndüğünde süreçleri serbest bırak
+                _surecYonetici.SurecleriDevamEttir(surecSonucu.KaraListedekiSurecler);
+            }
 
             durumYazici.Yaz(odakSonucu, veri, girdiOzeti, surecSonucu);
             KonsolaYaz(veri, girdiOzeti, surecSonucu, odakSonucu, ayarlar);
@@ -127,27 +138,17 @@ internal static class Program
         if (Console.IsOutputRedirected)
         {
             DateTimeOffset simdi = DateTimeOffset.Now;
-            if ((simdi - _sonYonlendirilmisCikti).TotalSeconds < 2)
-            {
-                return;
-            }
+            if ((simdi - _sonYonlendirilmisCikti).TotalSeconds < 2) return;
 
             _sonYonlendirilmisCikti = simdi;
-            Console.WriteLine(
-                $"{simdi:HH:mm:ss} | Odak {odak.Puan}/100 | Yüz: {(veri.YuzVar ? "var" : "yok")} | Kara liste: {surec.KaraListeOzeti} | Cezalar: {odak.CezaOzeti}");
+            Console.WriteLine($"{simdi:HH:mm:ss} | Odak {odak.Puan}/100 | Yüz: {(veri.YuzVar ? "var" : "yok")} | Kara liste: {surec.KaraListeOzeti} | Cezalar: {odak.CezaOzeti}");
             return;
         }
 
         if (!Console.IsOutputRedirected)
         {
-            try
-            {
-                Console.SetCursorPosition(0, 0);
-            }
-            catch (IOException)
-            {
-                // Bazı terminaller imleç konumlandırmayı desteklemeyebilir.
-            }
+            try { Console.SetCursorPosition(0, 0); }
+            catch (IOException) { }
         }
 
         Console.WriteLine("================ FOKUS KARAR MOTORU ================".PadRight(90));
@@ -172,7 +173,7 @@ internal static class Program
         Console.ForegroundColor = eskiRenk;
 
         string karar = odak.MudahaleGerekli
-            ? "Müdahale gerekli: kara listedeki süreçler için SY modülüne komut üretilebilir."
+            ? "MÜDAHALE EDİLİYOR: Kara listedeki süreçler donduruldu."
             : "Müdahale gerekmiyor.";
 
         Console.WriteLine($"Karar:              {karar}".PadRight(90));
