@@ -22,22 +22,23 @@ pip install -r requirements.txt
 
 ### Çalıştırma
 ```bash
-python kamera_test.py
+ÇALIŞTIR.bat
 ```
-Bu komut kamera modülünü açar ve C# karar motorunu arka planda otomatik başlatır.
+Bu komut bağımlılıkları kontrol eder ve WPF arayüzünü başlatır.
 
-## Pipe (C#) tarafı - Manuel
-Normal kullanımda gerekmez. Karar motorunu tek başına test etmek isterseniz:
+Alternatif olarak:
 ```bash
-cd KararMotoru
-dotnet run
+dotnet run --project .\KararMotoru\KararMotoru.csproj
 ```
 
 ## Modüller
 - `kamera_test.py` — Biyometrik analiz modülü (Berke)
-- `KararMotoru` — Karar motoru, girdi izleme ve odak analiz modülü (Batuhan Sami)
+- `KararMotoru` — WPF arayüz, karar motoru, girdi izleme ve odak analiz modülü (Batuhan Sami)
+- `bagimlilik_kontrol.py` — Başlangıçta çalışan Python paket kontrolü
 
 ## Notlar
 - İlk çalıştırmada `face_landmarker.task` modeli otomatik indirilir (~30MB)
-- Kalibrasyon ekranında 3 saniye düz oturup ekrana bakın
-- Çıkmak için `q` tuşuna basın
+- Kamera görüntüsü WPF içinde açılır; ayrı OpenCV penceresi normal kullanımda açılmaz.
+- Kalibrasyon sırasında 3 saniye düz oturup ekrana bakın.
+- Süreç müdahalesi varsayılan olarak kapalıdır; arayüzden açılır.
+- Oturum geçmişi `odak_oturum_gecmisi.csv` dosyasına yazılır.

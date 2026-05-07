@@ -25,6 +25,10 @@ public sealed class PythonCameraWorker : IDisposable
 
     public string LogPath { get; }
 
+    public int PreviewFps { get; set; } = 30;
+
+    public int AnalysisFps { get; set; } = 10;
+
     public bool Calisiyor => _process is { HasExited: false };
 
     public event EventHandler<string>? LogChanged;
@@ -63,9 +67,9 @@ public sealed class PythonCameraWorker : IDisposable
         startInfo.ArgumentList.Add("--pipe-name");
         startInfo.ArgumentList.Add(PipeName);
         startInfo.ArgumentList.Add("--preview-fps");
-        startInfo.ArgumentList.Add("30");
+        startInfo.ArgumentList.Add(Math.Clamp(PreviewFps, 5, 60).ToString(System.Globalization.CultureInfo.InvariantCulture));
         startInfo.ArgumentList.Add("--analysis-fps");
-        startInfo.ArgumentList.Add("10");
+        startInfo.ArgumentList.Add(Math.Clamp(AnalysisFps, 1, 30).ToString(System.Globalization.CultureInfo.InvariantCulture));
         startInfo.Environment["FOKUS_KARAR_MOTORU_OTOMATIK"] = "0";
         startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
         startInfo.Environment["PYTHONUNBUFFERED"] = "1";
@@ -87,6 +91,55 @@ public sealed class PythonCameraWorker : IDisposable
         YazLog("Python kamera isçisi baslatildi.");
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();
+    }
+
+    public async Task<PythonDependencyCheckResult> CheckDependenciesAsync(bool fast = true, TimeSpan? timeout = null)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = PythonKomutuBul(),
+            WorkingDirectory = _projeKoku,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        startInfo.ArgumentList.Add(Path.Combine(_projeKoku, "bagimlilik_kontrol.py"));
+        if (fast)
+        {
+            startInfo.ArgumentList.Add("--fast");
+        }
+
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return new PythonDependencyCheckResult(false, "Python baslatilamadi.");
+            }
+
+            using var timeoutSource = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(20));
+            string output = await process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
+            string error = await process.StandardError.ReadToEndAsync(timeoutSource.Token);
+            await process.WaitForExitAsync(timeoutSource.Token);
+            string sonuc = (output + Environment.NewLine + error).Trim();
+            if (string.IsNullOrWhiteSpace(sonuc))
+            {
+                sonuc = "Bagimlilik kontrolu tamamlandi.";
+            }
+
+            return new PythonDependencyCheckResult(process.ExitCode == 0, sonuc);
+        }
+        catch (OperationCanceledException)
+        {
+            return new PythonDependencyCheckResult(false, "Bagimlilik kontrolu zaman asimina ugradi.");
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return new PythonDependencyCheckResult(false, "Bagimlilik kontrolu calistirilamadi: " + ex.Message);
+        }
     }
 
     public async Task StopAsync(TimeSpan? timeout = null)
@@ -171,3 +224,5 @@ public sealed class PythonCameraWorker : IDisposable
         return "python";
     }
 }
+
+public sealed record PythonDependencyCheckResult(bool Ok, string Message);

@@ -1,7 +1,4 @@
 import cv2
-import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
 import numpy as np
 import argparse
 import os
@@ -39,6 +36,12 @@ ANALIZ_INTERVAL = 1 / 10
 son_frame_yazma = 0.0
 son_analiz_zamani = 0.0
 son_result = None
+detector = None
+detector_hazir = False
+detector_hatasi = None
+mp = None
+python = None
+vision = None
 
 # Kalibrasyon değerleri
 kalibrasyon_tamam = False
@@ -103,6 +106,43 @@ def frame_yaz(frame):
                 os.remove(tmp_yol)
         except Exception:
             pass
+
+def analiz_modelini_yukle():
+    global detector, detector_hazir, detector_hatasi, mp, python, vision
+
+    try:
+        import mediapipe as mp_mod
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision as mp_vision
+
+        mp = mp_mod
+        python = mp_python
+        vision = mp_vision
+
+        model_path = "face_landmarker.task"
+        if not os.path.exists(model_path):
+            import urllib.request
+            print("Model indiriliyor...")
+            urllib.request.urlretrieve(
+                "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                model_path
+            )
+
+        base_options = python.BaseOptions(model_asset_path=model_path)
+        options = vision.FaceLandmarkerOptions(
+            base_options=base_options,
+            num_faces=1,
+            min_face_detection_confidence=0.5,
+            min_face_presence_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+
+        detector = vision.FaceLandmarker.create_from_options(options)
+        detector_hazir = True
+        print("Analiz modeli hazir.")
+    except Exception as e:
+        detector_hatasi = str(e)
+        print(f"Analiz modeli yuklenemedi: {e}")
 
 def karar_motoru_zaten_calisiyor():
     try:
@@ -288,29 +328,16 @@ print(f"Onizleme FPS: {args.preview_fps:.0f}, analiz FPS: {args.analysis_fps:.0f
 pipe_thread = threading.Thread(target=pipe_sunucusu, daemon=True)
 pipe_thread.start()
 
-model_path = "face_landmarker.task"
-if not os.path.exists(model_path):
-    import urllib.request
-    print("Model indiriliyor...")
-    urllib.request.urlretrieve(
-        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-        model_path
-    )
-
-base_options = python.BaseOptions(model_asset_path=model_path)
-options = vision.FaceLandmarkerOptions(
-    base_options=base_options,
-    num_faces=1,
-    min_face_detection_confidence=0.5,
-    min_face_presence_confidence=0.5,
-    min_tracking_confidence=0.5
-)
-
-detector = vision.FaceLandmarker.create_from_options(options)
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 cap.set(cv2.CAP_PROP_FPS, 30)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+if not cap.isOpened():
+    print("Kamera acilamadi. Kamera izinlerini ve baska uygulama kullanip kullanmadigini kontrol edin.")
+
+model_thread = threading.Thread(target=analiz_modelini_yukle, daemon=True)
+model_thread.start()
 
 karar_motoru_baslat()
 
@@ -321,7 +348,7 @@ while True:
 
     h, w, _ = frame.shape
     simdi = time.time()
-    if simdi - son_analiz_zamani >= ANALIZ_INTERVAL:
+    if detector_hazir and detector is not None and simdi - son_analiz_zamani >= ANALIZ_INTERVAL:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         son_result = detector.detect(mp_image)
@@ -330,7 +357,18 @@ while True:
     result = son_result
     frame = cv2.flip(frame, 1)
 
-    if result and result.face_landmarks:
+    if not detector_hazir:
+        mesaj = "Analiz yukleniyor..."
+        if detector_hatasi:
+            mesaj = "Analiz modeli hatasi"
+        cv2.putText(frame, mesaj, (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+        pipe_durum = "PIPE: BAGLI" if pipe_bagli else "PIPE: BEKLENIYOR"
+        pipe_renk = (0, 255, 0) if pipe_bagli else (0, 165, 255)
+        cv2.putText(frame, pipe_durum, (20, 75),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, pipe_renk, 2)
+
+    elif result and result.face_landmarks:
         landmarks = result.face_landmarks[0]
 
         sol_ear = ear_hesapla(landmarks, SOL_GOZ, w, h)

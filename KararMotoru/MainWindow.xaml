@@ -14,7 +14,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="250"/>
+            <RowDefinition Height="300"/>
         </Grid.RowDefinitions>
 
         <DockPanel Grid.Row="0" Margin="0,0,0,14">
@@ -157,61 +157,93 @@
             <TabItem Header="Oturum">
                 <Grid Margin="12">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="3*"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="Süre" Foreground="{StaticResource MutedTextBrush}"/>
-                        <TextBlock x:Name="SessionDurationText" FontSize="24" FontWeight="SemiBold" Text="00:00"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1">
-                        <TextBlock Text="Ortalama odak" Foreground="{StaticResource MutedTextBrush}"/>
-                        <TextBlock x:Name="AverageFocusText" FontSize="24" FontWeight="SemiBold" Text="-"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2">
-                        <TextBlock Text="Minimum odak" Foreground="{StaticResource MutedTextBrush}"/>
-                        <TextBlock x:Name="MinimumFocusText" FontSize="24" FontWeight="SemiBold" Text="-"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="3">
-                        <TextBlock Text="Düşük odak süresi" Foreground="{StaticResource MutedTextBrush}"/>
-                        <TextBlock x:Name="LowFocusTimeText" FontSize="24" FontWeight="SemiBold" Text="0 sn"/>
-                    </StackPanel>
+                    <UniformGrid Columns="2">
+                        <StackPanel>
+                            <TextBlock Text="Süre" Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock x:Name="SessionDurationText" FontSize="24" FontWeight="SemiBold" Text="00:00"/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Ortalama odak" Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock x:Name="AverageFocusText" FontSize="24" FontWeight="SemiBold" Text="-"/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Minimum odak" Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock x:Name="MinimumFocusText" FontSize="24" FontWeight="SemiBold" Text="-"/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Düşük odak süresi" Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock x:Name="LowFocusTimeText" FontSize="24" FontWeight="SemiBold" Text="0 sn"/>
+                        </StackPanel>
+                    </UniformGrid>
+                    <Grid Grid.Column="1" Margin="18,0,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,8">
+                            <Button DockPanel.Dock="Right" Content="Yenile" Click="RefreshReportsButton_Click"/>
+                            <TextBlock Text="Geçmiş Oturumlar" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <ListBox x:Name="SessionHistoryList" Grid.Row="1"/>
+                    </Grid>
                 </Grid>
             </TabItem>
             <TabItem Header="Ayarlar">
-                <Grid Margin="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="260"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="Odak eşiği" FontWeight="SemiBold"/>
-                        <TextBox x:Name="ThresholdTextBox" Margin="0,8,0,14"/>
-                        <TextBlock Text="Klavye beklenen / dk" FontWeight="SemiBold"/>
-                        <TextBox x:Name="KeyboardExpectedTextBox" Margin="0,8,0,14"/>
-                        <TextBlock Text="Fare beklenen px / dk" FontWeight="SemiBold"/>
-                        <TextBox x:Name="MouseExpectedTextBox" Margin="0,8,0,0"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="18,0,0,0">
-                        <TextBlock Text="Kara liste" FontWeight="SemiBold"/>
-                        <TextBox x:Name="BlacklistSettingsTextBox"
-                                 Margin="0,8,0,0"
-                                 Height="150"
-                                 AcceptsReturn="True"
-                                 VerticalScrollBarVisibility="Auto"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" Margin="18,0,0,0">
-                        <TextBlock Text="Beyaz liste" FontWeight="SemiBold"/>
-                        <TextBox x:Name="WhitelistSettingsTextBox"
-                                 Margin="0,8,0,0"
-                                 Height="150"
-                                 AcceptsReturn="True"
-                                 VerticalScrollBarVisibility="Auto"/>
-                    </StackPanel>
-                </Grid>
+                <ScrollViewer Margin="12" VerticalScrollBarVisibility="Auto">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="250"/>
+                            <ColumnDefinition Width="250"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Odak eşiği" FontWeight="SemiBold"/>
+                            <TextBox x:Name="ThresholdTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="Önizleme FPS" FontWeight="SemiBold"/>
+                            <TextBox x:Name="PreviewFpsTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="Analiz FPS" FontWeight="SemiBold"/>
+                            <TextBox x:Name="AnalysisFpsTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="Klavye beklenen / dk" FontWeight="SemiBold"/>
+                            <TextBox x:Name="KeyboardExpectedTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="Fare beklenen px / dk" FontWeight="SemiBold"/>
+                            <TextBox x:Name="MouseExpectedTextBox" Margin="0,8,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="18,0,0,0">
+                            <TextBlock Text="EAR ceza katsayısı" FontWeight="SemiBold"/>
+                            <TextBox x:Name="EarPenaltyFactorTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="EAR ceza tavanı" FontWeight="SemiBold"/>
+                            <TextBox x:Name="EarPenaltyCapTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="Bakış eşiği" FontWeight="SemiBold"/>
+                            <TextBox x:Name="GazeThresholdTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="Bakış ceza katsayısı" FontWeight="SemiBold"/>
+                            <TextBox x:Name="GazePenaltyFactorTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="Postür eşiği" FontWeight="SemiBold"/>
+                            <TextBox x:Name="PostureThresholdTextBox" Margin="0,8,0,10"/>
+                            <TextBlock Text="Postür ceza katsayısı" FontWeight="SemiBold"/>
+                            <TextBox x:Name="PosturePenaltyFactorTextBox" Margin="0,8,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Margin="18,0,0,0">
+                            <TextBlock Text="Kara liste" FontWeight="SemiBold"/>
+                            <TextBox x:Name="BlacklistSettingsTextBox"
+                                     Margin="0,8,0,0"
+                                     Height="220"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" Margin="18,0,0,0">
+                            <TextBlock Text="Beyaz liste" FontWeight="SemiBold"/>
+                            <TextBox x:Name="WhitelistSettingsTextBox"
+                                     Margin="0,8,0,0"
+                                     Height="220"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto"/>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
             </TabItem>
         </TabControl>
     </Grid>

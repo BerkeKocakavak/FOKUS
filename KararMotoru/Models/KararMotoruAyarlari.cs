@@ -16,6 +16,10 @@ public sealed class KararMotoruAyarlari
 
     public int HareketsizlikUyariSaniyesi { get; set; } = 45;
 
+    public int KameraOnizlemeFps { get; set; } = 30;
+
+    public int KameraAnalizFps { get; set; } = 10;
+
     public double KlavyeDakikaBeklenen { get; set; } = 8;
 
     public double FarePikselDakikaBeklenen { get; set; } = 900;
@@ -77,8 +81,19 @@ public sealed class KararMotoruAyarlari
         GirdiOrneklemeMs = Math.Clamp(GirdiOrneklemeMs, 30, 1000);
         AktivitePenceresiSaniye = Math.Clamp(AktivitePenceresiSaniye, 10, 600);
         HareketsizlikUyariSaniyesi = Math.Clamp(HareketsizlikUyariSaniyesi, 5, 3600);
+        KameraOnizlemeFps = Math.Clamp(KameraOnizlemeFps, 5, 60);
+        KameraAnalizFps = Math.Clamp(KameraAnalizFps, 1, 30);
         KlavyeDakikaBeklenen = Math.Max(1, KlavyeDakikaBeklenen);
         FarePikselDakikaBeklenen = Math.Max(1, FarePikselDakikaBeklenen);
+        DusukAktiviteCezaTavani = Math.Clamp(DusukAktiviteCezaTavani, 0, 50);
+        EarCezaKatsayisi = Math.Clamp(EarCezaKatsayisi, 0, 1000);
+        EarCezaTavani = Math.Clamp(EarCezaTavani, 0, 60);
+        GazeEsigi = Math.Clamp(GazeEsigi, 0, 0.25);
+        GazeCezaKatsayisi = Math.Clamp(GazeCezaKatsayisi, 0, 1000);
+        GazeCezaTavani = Math.Clamp(GazeCezaTavani, 0, 60);
+        PosturEsigi = Math.Clamp(PosturEsigi, 0, 60);
+        PosturCezaKatsayisi = Math.Clamp(PosturCezaKatsayisi, 0, 5);
+        PosturCezaTavani = Math.Clamp(PosturCezaTavani, 0, 60);
         BeyazListeAktifkenKaraListeCezaKatsayisi = Math.Clamp(BeyazListeAktifkenKaraListeCezaKatsayisi, 0, 1);
 
         if (KaraListeCezaBasamaklari.Length == 0)
