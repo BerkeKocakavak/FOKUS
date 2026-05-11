@@ -14,21 +14,18 @@ namespace FokusKararMotoru;
 public partial class MainWindow : Window
 {
     private const int HistoryLimit = 120;
-    private const string HistoryCsvHeader = "session_id,zaman,odak_puani,yuz_var,pipe_bagli,kara_liste,tus_dakika,fare_piksel_dakika,hareketsiz_saniye";
 
     private readonly string _projeKoku;
-    private readonly string _sessionId = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+    private readonly FokusDb _database;
     private readonly KararMotoruWorker _kararMotoruWorker;
     private readonly PythonCameraWorker _pythonCameraWorker;
     private readonly DispatcherTimer _frameTimer;
     private readonly List<int> _odakGecmisi = [];
 
     private KararMotoruAyarlari _ayarlar;
-    private string _historyCsvPath = string.Empty;
     private DateTime _sonFrameZamani;
     private DateTimeOffset _sonUyariZamani = DateTimeOffset.MinValue;
     private DateTimeOffset _sessionStart = DateTimeOffset.Now;
-    private DateTimeOffset _lastHistoryWrite = DateTimeOffset.MinValue;
     private DateTimeOffset? _lastStateTime;
     private FocusAlertWindow? _uyariPenceresi;
     private FocusOverlayWindow? _overlayWindow;
@@ -47,11 +44,12 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _projeKoku = ProjeYolu.Bul();
-        _historyCsvPath = System.IO.Path.Combine(_projeKoku, "odak_oturum_gecmisi.csv");
+        _database = new FokusDb(_projeKoku);
+        _database.EnsureCreated();
         _pythonCameraWorker = new PythonCameraWorker(_projeKoku);
         _ayarlar = AyarDeposu.YukleVeyaOlustur(_projeKoku);
         KameraAyarlariniUygula();
-        _kararMotoruWorker = new KararMotoruWorker(_projeKoku, _ayarlar, _pythonCameraWorker.PipeName);
+        _kararMotoruWorker = new KararMotoruWorker(_projeKoku, _ayarlar, _pythonCameraWorker.PipeName, _database);
         _frameTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
         _frameTimer.Tick += (_, _) => KameraKaresiniGuncelle();
 
@@ -62,6 +60,7 @@ public partial class MainWindow : Window
         HistoryCanvas.SizeChanged += (_, _) => OdakGecmisiniCiz();
 
         AyarlariFormaYukle();
+        KamerayiTemizle();
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -97,6 +96,7 @@ public partial class MainWindow : Window
         IsEnabled = false;
         Hide();
         _frameTimer.Stop();
+        KamerayiTemizle();
         _uyariPenceresi?.Close();
         _overlayWindow?.Close();
         _overlayWindow = null;
@@ -112,6 +112,7 @@ public partial class MainWindow : Window
             StatusText.Text = "Kapanış sırasında hata: " + ex.Message;
         }
 
+        KameraKaresiniSil();
         _kararMotoruWorker.Dispose();
         _pythonCameraWorker.Dispose();
     }
@@ -126,7 +127,10 @@ public partial class MainWindow : Window
         _frameTimer.Stop();
         await _pythonCameraWorker.StopAsync(TimeSpan.FromSeconds(2));
         await _kararMotoruWorker.StopAsync(TimeSpan.FromSeconds(2));
+        KamerayiTemizle();
+        KameraKaresiniSil();
         _overlayWindow?.SetStopped();
+        RaporlariYukle();
         StatusText.Text = "Durduruldu";
     }
 
@@ -184,6 +188,8 @@ public partial class MainWindow : Window
         {
             StatusText.Text = "FPS ayarları uygulanıyor...";
             await _pythonCameraWorker.StopAsync(TimeSpan.FromSeconds(2));
+            KamerayiTemizle();
+            KameraKaresiniSil();
             _pythonCameraWorker.Start();
         }
 
@@ -208,6 +214,10 @@ public partial class MainWindow : Window
         StartButton.IsEnabled = false;
         try
         {
+            _frameTimer.Stop();
+            KamerayiTemizle();
+            KameraKaresiniSil();
+
             if (!_bagimlilikKontroluGecti)
             {
                 StatusText.Text = "Başlangıç kontrolü yapılıyor...";
@@ -216,6 +226,7 @@ public partial class MainWindow : Window
                 {
                     ErrorText.Text = kontrol.Message + Environment.NewLine + "Eksikleri kurmak için: python -m pip install -r requirements.txt";
                     StatusText.Text = "Python paketleri eksik.";
+                    KamerayiTemizle();
                     _overlayWindow?.SetStopped();
                     return;
                 }
@@ -233,6 +244,7 @@ public partial class MainWindow : Window
         {
             StatusText.Text = "Başlatılamadı: " + ex.Message;
             ErrorText.Text = ex.Message;
+            KamerayiTemizle();
         }
         finally
         {
@@ -262,12 +274,23 @@ public partial class MainWindow : Window
         KeysPerMinuteText.Text = (state.Girdi?.TusDakika ?? 0).ToString("0.0", CultureInfo.CurrentCulture);
         MousePerMinuteText.Text = (state.Girdi?.FarePikselDakika ?? 0).ToString("0", CultureInfo.CurrentCulture);
         IdleSecondsText.Text = (state.Girdi?.HareketsizSaniye ?? 0).ToString("0", CultureInfo.CurrentCulture);
+        AnalysisStatusText.Text = state.Biyometrik?.AnalizDurumu ?? "-";
+        CalibrationStatusText.Text = state.Biyometrik is null
+            ? "-"
+            : state.Biyometrik.KalibrasyonTamam
+                ? "Tamam"
+                : state.Biyometrik.KalibrasyonKalanSaniye > 0
+                    ? $"{state.Biyometrik.KalibrasyonKalanSaniye} sn"
+                    : "Bekleniyor";
+        GazeDirectionText.Text = state.Biyometrik?.GazeYon ?? "-";
+        PostureStatusText.Text = state.Biyometrik?.BasDurum ?? "-";
         EarText.Text = state.Biyometrik is null
             ? "-"
             : $"{state.Biyometrik.Ear:0.00} / {state.Biyometrik.EarEsik:0.00}";
         PoseText.Text = state.Biyometrik is null
             ? "-"
             : $"{state.Biyometrik.GazeSapma:0.000} / {state.Biyometrik.OneSapma:0.0}";
+        BlinkText.Text = (state.Biyometrik?.KirpmaSayisi ?? 0).ToString(CultureInfo.CurrentCulture);
 
         PenaltyList.ItemsSource = state.Odak?.Cezalar.Count > 0
             ? state.Odak.Cezalar.Select(ceza => $"{ceza.Kaynak}: -{ceza.Deger:0.#}  {ceza.Aciklama}").ToArray()
@@ -318,6 +341,32 @@ public partial class MainWindow : Window
             _sonFrameZamani = yazmaZamani;
         }
         catch (IOException)
+        {
+        }
+    }
+
+    private void KamerayiTemizle()
+    {
+        CameraImage.Source = null;
+        CameraPlaceholder.Text = string.Empty;
+        CameraPlaceholder.Visibility = Visibility.Collapsed;
+        _sonFrameZamani = DateTime.MinValue;
+    }
+
+    private void KameraKaresiniSil()
+    {
+        try
+        {
+            string framePath = _pythonCameraWorker.FramePath;
+            if (File.Exists(framePath))
+            {
+                File.Delete(framePath);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
         {
         }
     }
@@ -393,41 +442,6 @@ public partial class MainWindow : Window
         MinimumFocusText.Text = _minimumFocus.ToString(CultureInfo.CurrentCulture);
         LowFocusTimeText.Text = $"{_lowFocusSeconds:0} sn";
 
-        if (simdi - _lastHistoryWrite >= TimeSpan.FromSeconds(1))
-        {
-            OturumCsvYaz(state, puan, simdi);
-            _lastHistoryWrite = simdi;
-        }
-    }
-
-    private void OturumCsvYaz(KararMotoruState state, int puan, DateTimeOffset zaman)
-    {
-        try
-        {
-            CsvBasliginiHazirla();
-
-            string karaListe = state.Surec is null
-                ? string.Empty
-                : string.Join("|", state.Surec.KaraListedekiSurecler);
-            string satir = string.Join(",",
-                Csv(_sessionId),
-                Csv(zaman.ToString("O", CultureInfo.InvariantCulture)),
-                Csv(puan.ToString(CultureInfo.InvariantCulture)),
-                Csv((state.Biyometrik?.YuzVar == true).ToString(CultureInfo.InvariantCulture)),
-                Csv(state.PipeBagli.ToString(CultureInfo.InvariantCulture)),
-                Csv(karaListe),
-                Csv((state.Girdi?.TusDakika ?? 0).ToString("0.###", CultureInfo.InvariantCulture)),
-                Csv((state.Girdi?.FarePikselDakika ?? 0).ToString("0.###", CultureInfo.InvariantCulture)),
-                Csv((state.Girdi?.HareketsizSaniye ?? 0).ToString("0.###", CultureInfo.InvariantCulture)));
-
-            File.AppendAllText(_historyCsvPath, satir + Environment.NewLine);
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
     }
 
     private void RefreshReportsButton_Click(object sender, RoutedEventArgs e)
@@ -437,47 +451,10 @@ public partial class MainWindow : Window
 
     private void RaporlariYukle()
     {
-        if (!File.Exists(_historyCsvPath))
-        {
-            SessionHistoryList.ItemsSource = new[] { "Henüz kayıtlı oturum yok." };
-            return;
-        }
-
-        var oturumlar = new Dictionary<string, OturumRaporu>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            foreach (string satir in File.ReadLines(_historyCsvPath).Skip(1))
-            {
-                string[] alanlar = CsvAyir(satir);
-                if (alanlar.Length < 9)
-                {
-                    continue;
-                }
-
-                string sessionId = alanlar[0];
-                if (!DateTimeOffset.TryParse(alanlar[1], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset zaman))
-                {
-                    continue;
-                }
-
-                if (!int.TryParse(alanlar[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int puan))
-                {
-                    continue;
-                }
-
-                if (!oturumlar.TryGetValue(sessionId, out OturumRaporu? rapor))
-                {
-                    rapor = new OturumRaporu(sessionId);
-                    oturumlar[sessionId] = rapor;
-                }
-
-                rapor.OrnekEkle(zaman, puan, !string.IsNullOrWhiteSpace(alanlar[5]), _ayarlar.OdakEsigi);
-            }
-
-            string[] liste = oturumlar.Values
-                .OrderByDescending(rapor => rapor.SonZaman)
-                .Take(12)
-                .Select(rapor => rapor.Ozetle())
+            string[] liste = _database.GetSessionSummaries(12, _ayarlar.OdakEsigi)
+                .Select(OturumOzeti)
                 .ToArray();
 
             SessionHistoryList.ItemsSource = liste.Length == 0
@@ -488,27 +465,14 @@ public partial class MainWindow : Window
         {
             SessionHistoryList.ItemsSource = new[] { "Rapor okunamadı: " + ex.Message };
         }
-    }
-
-    private void CsvBasliginiHazirla()
-    {
-        if (!File.Exists(_historyCsvPath) || new FileInfo(_historyCsvPath).Length == 0)
+        catch (InvalidOperationException ex)
         {
-            File.WriteAllText(_historyCsvPath, HistoryCsvHeader + Environment.NewLine);
-            return;
+            SessionHistoryList.ItemsSource = new[] { "Rapor okunamadı: " + ex.Message };
         }
-
-        string? ilkSatir = File.ReadLines(_historyCsvPath).FirstOrDefault();
-        if (string.Equals(ilkSatir, HistoryCsvHeader, StringComparison.Ordinal))
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
         {
-            return;
+            SessionHistoryList.ItemsSource = new[] { "Rapor okunamadı: " + ex.Message };
         }
-
-        string yedek = System.IO.Path.Combine(
-            _projeKoku,
-            "odak_oturum_gecmisi_legacy_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");
-        File.Move(_historyCsvPath, yedek, overwrite: true);
-        File.WriteAllText(_historyCsvPath, HistoryCsvHeader + Environment.NewLine);
     }
 
     private void UyariGoster(int puan, string mesaj)
@@ -592,6 +556,15 @@ public partial class MainWindow : Window
             .Split(["\r\n", "\n", "\r", ","], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static string OturumOzeti(SessionSummary summary)
+    {
+        string sure = summary.Duration.TotalHours >= 1
+            ? summary.Duration.ToString(@"hh\:mm\:ss", CultureInfo.CurrentCulture)
+            : summary.Duration.ToString(@"mm\:ss", CultureInfo.CurrentCulture);
+
+        return $"{summary.EndedAt:dd.MM HH:mm}  Süre: {sure}  Ort: {summary.AverageFocus:0.0}  Min: {summary.MinimumFocus}  Düşük: {summary.LowFocusSamples}  Kara liste: {summary.BlacklistSamples}";
     }
 
     private static string Csv(string text)

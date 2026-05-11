@@ -13,8 +13,9 @@ public partial class App : Application
             {
                 exitCode = SelfTest.Run();
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine(ex);
                 exitCode = 1;
             }
 

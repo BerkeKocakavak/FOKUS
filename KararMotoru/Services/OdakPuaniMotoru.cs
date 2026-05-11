@@ -14,6 +14,16 @@ public sealed class OdakPuaniMotoru
     {
         var cezalar = new List<CezaKalemi>();
 
+        if (!veri.AnalizHazir)
+        {
+            return SonucOlustur(_oncekiPuan, _oncekiPuan, false, cezalar);
+        }
+
+        if (!veri.KalibrasyonTamam)
+        {
+            return SonucOlustur(_oncekiPuan, _oncekiPuan, false, cezalar);
+        }
+
         if (!veri.YuzVar)
         {
             _oncekiPuan = Math.Max(0, _oncekiPuan - ayarlar.YuzYokkenDusmeHizi);

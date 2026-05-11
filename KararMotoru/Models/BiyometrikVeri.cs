@@ -30,4 +30,22 @@ public sealed class BiyometrikVeri
 
     [JsonPropertyName("yuz_var")]
     public bool YuzVar { get; set; }
+
+    [JsonPropertyName("gaze_yon")]
+    public string? GazeYon { get; set; }
+
+    [JsonPropertyName("bas_durum")]
+    public string? BasDurum { get; set; }
+
+    [JsonPropertyName("kalibrasyon_tamam")]
+    public bool KalibrasyonTamam { get; set; }
+
+    [JsonPropertyName("kalibrasyon_kalan_saniye")]
+    public int KalibrasyonKalanSaniye { get; set; }
+
+    [JsonPropertyName("analiz_hazir")]
+    public bool AnalizHazir { get; set; } = true;
+
+    [JsonPropertyName("analiz_durumu")]
+    public string? AnalizDurumu { get; set; }
 }

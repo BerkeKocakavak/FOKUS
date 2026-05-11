@@ -10,6 +10,7 @@ public sealed class KararMotoruWorker : IDisposable
 {
     private readonly string _projeKoku;
     private readonly string _pipeName;
+    private readonly FokusDb? _database;
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly SurecYonetici _surecYonetici = new();
     private readonly SurecTarayici _surecTarayici = new();
@@ -21,12 +22,15 @@ public sealed class KararMotoruWorker : IDisposable
     private GirdiIzleyici? _girdiIzleyici;
     private NamedPipeClientStream? _activePipeClient;
     private KararMotoruState _sonState = new();
+    private string? _sessionId;
+    private DateTimeOffset _lastDbWrite = DateTimeOffset.MinValue;
     private bool _disposed;
 
-    public KararMotoruWorker(string projeKoku, KararMotoruAyarlari ayarlar, string pipeName = "fokus_pipe")
+    public KararMotoruWorker(string projeKoku, KararMotoruAyarlari ayarlar, string pipeName = "fokus_pipe", FokusDb? database = null)
     {
         _projeKoku = projeKoku;
         _pipeName = pipeName;
+        _database = database;
         Ayarlar = ayarlar;
         _durumYazici = new DurumYazici(projeKoku);
     }
@@ -79,6 +83,10 @@ public sealed class KararMotoruWorker : IDisposable
 
         _cancellation = new CancellationTokenSource();
         _girdiIzleyici = new GirdiIzleyici(Ayarlar.GirdiOrneklemeMs);
+        _sessionId = DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+        _lastDbWrite = DateTimeOffset.MinValue;
+        _database?.EnsureCreated();
+        _database?.StartSession(_sessionId, DateTimeOffset.Now);
         _workerTask = Task.Run(() => RunAsync(_cancellation.Token));
     }
 
@@ -128,6 +136,12 @@ public sealed class KararMotoruWorker : IDisposable
             {
                 cancellation.Dispose();
                 _workerTask = null;
+            }
+
+            if (_sessionId is not null)
+            {
+                _database?.EndSession(_sessionId, DateTimeOffset.Now);
+                _sessionId = null;
             }
 
             _cancellation = null;
@@ -236,7 +250,7 @@ public sealed class KararMotoruWorker : IDisposable
                 string? mudahaleHatasi = MudahaleUygula(odakSonucu, surecSonucu);
                 _durumYazici.Yaz(odakSonucu, veri, girdiOzeti, surecSonucu);
 
-                Publish(new KararMotoruState
+                KararMotoruState state = new()
                 {
                     Zaman = DateTimeOffset.Now,
                     PipeBagli = true,
@@ -247,7 +261,10 @@ public sealed class KararMotoruWorker : IDisposable
                     Surec = surecSonucu,
                     Odak = odakSonucu,
                     Hata = mudahaleHatasi
-                });
+                };
+
+                VeritabaniKaydiYaz(state);
+                Publish(state);
             }
         }
         finally
@@ -323,6 +340,29 @@ public sealed class KararMotoruWorker : IDisposable
     {
         _sonState = state;
         StateChanged?.Invoke(this, state);
+    }
+
+    private void VeritabaniKaydiYaz(KararMotoruState state)
+    {
+        if (_database is null || _sessionId is null || state.Odak is null)
+        {
+            return;
+        }
+
+        if (state.Zaman - _lastDbWrite < TimeSpan.FromSeconds(1))
+        {
+            return;
+        }
+
+        try
+        {
+            _database.SaveSample(_sessionId, state);
+            _lastDbWrite = state.Zaman;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            Publish(_sonState with { Hata = "Veritabani kayit hatasi: " + ex.Message });
+        }
     }
 
     private static string kolayDurumMesaji(OdakSonucu odakSonucu)

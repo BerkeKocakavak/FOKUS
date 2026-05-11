@@ -361,12 +361,15 @@ while True:
         mesaj = "Analiz yukleniyor..."
         if detector_hatasi:
             mesaj = "Analiz modeli hatasi"
-        cv2.putText(frame, mesaj, (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
-        pipe_durum = "PIPE: BAGLI" if pipe_bagli else "PIPE: BEKLENIYOR"
-        pipe_renk = (0, 255, 0) if pipe_bagli else (0, 165, 255)
-        cv2.putText(frame, pipe_durum, (20, 75),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, pipe_renk, 2)
+        with veri_kilidi:
+            paylasilan_veri.update({
+                "zaman": time.time(),
+                "yuz_var": False,
+                "analiz_hazir": False,
+                "analiz_durumu": mesaj,
+                "kalibrasyon_tamam": False,
+                "kalibrasyon_kalan_saniye": 0
+            })
 
     elif result and result.face_landmarks:
         landmarks = result.face_landmarks[0]
@@ -389,12 +392,24 @@ while True:
             kal_one_listesi.append(one_egim)
             kal_yana_listesi.append(yana_egim)
 
-            cv2.putText(frame, "KALIBRASYON", (w//2 - 120, h//2 - 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
-            cv2.putText(frame, "Duz oturun, ekrana bakin", (w//2 - 180, h//2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-            cv2.putText(frame, f"{kalan} saniye", (w//2 - 60, h//2 + 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+            with veri_kilidi:
+                paylasilan_veri.update({
+                    "zaman": time.time(),
+                    "ear": round(ear, 3),
+                    "ear_esik": round(ref_ear * 0.75 if ref_ear else 0, 3),
+                    "gaze": round(gaze, 3),
+                    "gaze_sapma": 0,
+                    "one_sapma": 0,
+                    "yana_sapma": 0,
+                    "kirpma_sayisi": toplam_kirpma,
+                    "yuz_var": True,
+                    "gaze_yon": "KALIBRASYON",
+                    "bas_durum": "KALIBRASYON",
+                    "analiz_hazir": True,
+                    "analiz_durumu": "Kalibrasyon",
+                    "kalibrasyon_tamam": False,
+                    "kalibrasyon_kalan_saniye": max(kalan, 0)
+                })
 
             if gecen >= KALIBRASYON_SURE:
                 ref_ear = np.mean(kal_ear_listesi)
@@ -417,32 +432,24 @@ while True:
             gaze_sapma = gaze - ref_gaze
             if gaze_sapma > 0.02:
                 gaze_yon = "SOLA BAKIYOR"
-                gaze_renk = (0, 165, 255)
             elif gaze_sapma < -0.02:
                 gaze_yon = "SAGA BAKIYOR"
-                gaze_renk = (0, 165, 255)
             else:
                 gaze_yon = "MERKEZE BAKIYOR"
-                gaze_renk = (0, 255, 0)
 
             one_sapma = one_egim - ref_one
             yana_sapma = yana_egim - ref_yana
 
             if one_sapma > 15:
                 bas_durum = "BAS ONE EGILMIS"
-                bas_renk = (0, 0, 255)
             elif one_sapma < -8:
                 bas_durum = "BAS ARKAYA EGILMIS"
-                bas_renk = (0, 0, 255)
             elif yana_sapma > 15:
                 bas_durum = "BAS SOLA YATIYOR"
-                bas_renk = (0, 165, 255)
             elif yana_sapma < -15:
                 bas_durum = "BAS SAGA YATIYOR"
-                bas_renk = (0, 165, 255)
             else:
                 bas_durum = "BAS DUZGUN"
-                bas_renk = (0, 255, 0)
 
             # Verileri IPC için hazırla
             with veri_kilidi:
@@ -455,55 +462,27 @@ while True:
                     "one_sapma": round(one_sapma, 1),
                     "yana_sapma": round(yana_sapma, 1),
                     "kirpma_sayisi": toplam_kirpma,
-                    "yuz_var": True
+                    "yuz_var": True,
+                    "gaze_yon": gaze_yon,
+                    "bas_durum": bas_durum,
+                    "analiz_hazir": True,
+                    "analiz_durumu": "Analiz aktif",
+                    "kalibrasyon_tamam": True,
+                    "kalibrasyon_kalan_saniye": 0
                 })
-
-            # Landmark noktaları
-            for i in SOL_GOZ + SAG_GOZ + SOL_IRIS + SAG_IRIS:
-                x = int((1 - landmarks[i].x) * w)
-                y = int(landmarks[i].y * h)
-                cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
-
-            ear_renk = (0, 0, 255) if ear < ear_esik else (0, 255, 0)
-            pipe_durum = "PIPE: BAGLI" if pipe_bagli else "PIPE: BEKLENIYOR"
-            pipe_renk = (0, 255, 0) if pipe_bagli else (0, 165, 255)
-
-            cv2.putText(frame, f"EAR: {ear:.2f} (esik:{ear_esik:.2f})", (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, ear_renk, 2)
-            cv2.putText(frame, f"Kirpma: {toplam_kirpma}", (20, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-            cv2.putText(frame, f"Gaze: {gaze:.2f} - {gaze_yon}", (20, 100),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, gaze_renk, 2)
-            cv2.putText(frame, bas_durum, (20, 130),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, bas_renk, 2)
-            cv2.putText(frame, pipe_durum, (20, 160),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, pipe_renk, 2)
-
-            # EKLENEN KISIM: Gerçek Odak Puanını C#'ın oluşturduğu dosyadan oku
-            odak_puani = 100
-            try:
-                if os.path.exists("aktif_odak.txt"):
-                    with open("aktif_odak.txt", "r") as f:
-                        odak_puani = int(f.read().strip())
-            except:
-                pass # Dosya o an yazılıyorsa (kilitliyse) hatayı yoksay, eski puanı göster
-
-            # Puana göre renk belirle (BGR formatında)
-            if odak_puani > 70:
-                puan_renk = (0, 255, 0) # Yeşil
-            elif odak_puani > 40:
-                puan_renk = (0, 255, 255) # Sarı
-            else:
-                puan_renk = (0, 0, 255) # Kırmızı
-
-            cv2.putText(frame, f"ODAK PUANI: {odak_puani} / 100", (20, 200),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.9, puan_renk, 2)
 
     else:
         with veri_kilidi:
-            paylasilan_veri.update({"yuz_var": False, "zaman": time.time()})
-        cv2.putText(frame, "Yuz Bulunamadi", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            paylasilan_veri.update({
+                "yuz_var": False,
+                "zaman": time.time(),
+                "analiz_hazir": True,
+                "analiz_durumu": "Yuz bulunamadi",
+                "kalibrasyon_tamam": kalibrasyon_tamam,
+                "kalibrasyon_kalan_saniye": 0,
+                "gaze_yon": "YOK",
+                "bas_durum": "YOK"
+            })
 
     frame_yaz(frame)
 

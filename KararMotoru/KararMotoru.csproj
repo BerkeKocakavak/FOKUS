@@ -14,4 +14,8 @@
     <EmbeddedResource Remove="bin\**;obj\**;codex_bin\**;codex_obj\**" />
     <None Remove="codex_bin\**;codex_obj\**" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+  </ItemGroup>
 </Project>

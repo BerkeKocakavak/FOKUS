@@ -131,7 +131,23 @@
                 </Grid>
             </TabItem>
             <TabItem Header="Girdi">
-                <UniformGrid Columns="5" Margin="12">
+                <UniformGrid Columns="4" Margin="12">
+                    <StackPanel>
+                        <TextBlock Text="Analiz" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="AnalysisStatusText" FontSize="20" FontWeight="SemiBold" Text="-"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Kalibrasyon" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="CalibrationStatusText" FontSize="20" FontWeight="SemiBold" Text="-"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Bakış yönü" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="GazeDirectionText" FontSize="20" FontWeight="SemiBold" Text="-"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Baş durumu" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="PostureStatusText" FontSize="20" FontWeight="SemiBold" Text="-"/>
+                    </StackPanel>
                     <StackPanel>
                         <TextBlock Text="Tuş/dk" Foreground="{StaticResource MutedTextBrush}"/>
                         <TextBlock x:Name="KeysPerMinuteText" FontSize="22" FontWeight="SemiBold" Text="0"/>
@@ -151,6 +167,10 @@
                     <StackPanel>
                         <TextBlock Text="Bakış / Postür" Foreground="{StaticResource MutedTextBrush}"/>
                         <TextBlock x:Name="PoseText" FontSize="22" FontWeight="SemiBold" Text="-"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Kırpma" Foreground="{StaticResource MutedTextBrush}"/>
+                        <TextBlock x:Name="BlinkText" FontSize="22" FontWeight="SemiBold" Text="0"/>
                     </StackPanel>
                 </UniformGrid>
             </TabItem>

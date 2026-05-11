@@ -15,4 +15,7 @@ camera_worker.log
 aktif_odak.txt*.tmp
 odak_oturum_gecmisi.csv
 odak_oturum_gecmisi_legacy_*.csv
+fokus.db
+fokus.db-shm
+fokus.db-wal
 aktif_odak.txt

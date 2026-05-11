@@ -24,7 +24,7 @@ pip install -r requirements.txt
 ```bash
 ÇALIŞTIR.bat
 ```
-Bu komut bağımlılıkları kontrol eder ve WPF arayüzünü başlatır.
+Bu komut WPF arayüzünü başlatır; uygulama başlangıçta Python paketlerini hızlıca kontrol eder.
 
 Alternatif olarak:
 ```bash
@@ -41,4 +41,4 @@ dotnet run --project .\KararMotoru\KararMotoru.csproj
 - Kamera görüntüsü WPF içinde açılır; ayrı OpenCV penceresi normal kullanımda açılmaz.
 - Kalibrasyon sırasında 3 saniye düz oturup ekrana bakın.
 - Süreç müdahalesi varsayılan olarak kapalıdır; arayüzden açılır.
-- Oturum geçmişi `odak_oturum_gecmisi.csv` dosyasına yazılır.
+- Oturum geçmişi ve odak örnekleri `fokus.db` SQLite veritabanına yazılır.
