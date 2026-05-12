@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Text;
 
 namespace FokusKararMotoru.Services;
@@ -7,6 +8,7 @@ namespace FokusKararMotoru.Services;
 public sealed class PythonCameraWorker : IDisposable
 {
     private readonly string _projeKoku;
+    private readonly string _legacyFramePath;
     private Process? _process;
     private StreamWriter? _logWriter;
     private bool _disposed;
@@ -15,13 +17,14 @@ public sealed class PythonCameraWorker : IDisposable
     {
         _projeKoku = projeKoku;
         PipeName = $"fokus_pipe_{Environment.ProcessId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
-        FramePath = Path.Combine(_projeKoku, "camera_frame.jpg");
+        FramePipeName = $"fokus_frame_pipe_{Environment.ProcessId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+        _legacyFramePath = Path.Combine(_projeKoku, "camera_frame.jpg");
         LogPath = Path.Combine(_projeKoku, "camera_worker.log");
     }
 
     public string PipeName { get; }
 
-    public string FramePath { get; }
+    public string FramePipeName { get; }
 
     public string LogPath { get; }
 
@@ -32,6 +35,11 @@ public sealed class PythonCameraWorker : IDisposable
     public bool Calisiyor => _process is { HasExited: false };
 
     public event EventHandler<string>? LogChanged;
+
+    public event EventHandler<CameraFrameReceivedEventArgs>? FrameReceived;
+
+    private CancellationTokenSource? _frameCancellation;
+    private Task? _frameReaderTask;
 
     public void Start()
     {
@@ -48,6 +56,7 @@ public sealed class PythonCameraWorker : IDisposable
 
         _logWriter?.Dispose();
         _logWriter = new StreamWriter(LogPath, false, Encoding.UTF8) { AutoFlush = true };
+        EskiKameraKaresiniSil();
 
         var startInfo = new ProcessStartInfo
         {
@@ -62,10 +71,10 @@ public sealed class PythonCameraWorker : IDisposable
         };
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add("--headless");
-        startInfo.ArgumentList.Add("--frame-output");
-        startInfo.ArgumentList.Add(FramePath);
         startInfo.ArgumentList.Add("--pipe-name");
         startInfo.ArgumentList.Add(PipeName);
+        startInfo.ArgumentList.Add("--frame-pipe-name");
+        startInfo.ArgumentList.Add(FramePipeName);
         startInfo.ArgumentList.Add("--preview-fps");
         startInfo.ArgumentList.Add(Math.Clamp(PreviewFps, 5, 60).ToString(System.Globalization.CultureInfo.InvariantCulture));
         startInfo.ArgumentList.Add("--analysis-fps");
@@ -89,6 +98,7 @@ public sealed class PythonCameraWorker : IDisposable
         }
 
         YazLog("Python kamera isçisi baslatildi.");
+        StartFrameReader();
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();
     }
@@ -147,6 +157,8 @@ public sealed class PythonCameraWorker : IDisposable
         Process? process = _process;
         if (process is null)
         {
+            await StopFrameReaderAsync(timeout ?? TimeSpan.FromSeconds(2));
+            EskiKameraKaresiniSil();
             return;
         }
 
@@ -171,6 +183,8 @@ public sealed class PythonCameraWorker : IDisposable
         }
         finally
         {
+            await StopFrameReaderAsync(timeout ?? TimeSpan.FromSeconds(2));
+            EskiKameraKaresiniSil();
             process.Dispose();
             _process = null;
             _logWriter?.Dispose();
@@ -192,6 +206,111 @@ public sealed class PythonCameraWorker : IDisposable
 
         Stop();
         _disposed = true;
+    }
+
+    private void StartFrameReader()
+    {
+        _frameCancellation?.Cancel();
+        _frameCancellation?.Dispose();
+        _frameCancellation = new CancellationTokenSource();
+        _frameReaderTask = Task.Run(() => FrameReaderLoopAsync(_frameCancellation.Token));
+    }
+
+    private async Task StopFrameReaderAsync(TimeSpan timeout)
+    {
+        CancellationTokenSource? cancellation = _frameCancellation;
+        Task? readerTask = _frameReaderTask;
+        if (cancellation is null)
+        {
+            return;
+        }
+
+        cancellation.Cancel();
+        if (readerTask is not null)
+        {
+            await Task.WhenAny(readerTask, Task.Delay(timeout));
+        }
+
+        cancellation.Dispose();
+        _frameCancellation = null;
+        _frameReaderTask = null;
+    }
+
+    private async Task FrameReaderLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var client = new NamedPipeClientStream(".", FramePipeName, PipeDirection.In, PipeOptions.Asynchronous);
+                await client.ConnectAsync(1000, cancellationToken);
+                YazLog("Kamera goruntu pipe baglandi.");
+
+                while (!cancellationToken.IsCancellationRequested && client.IsConnected)
+                {
+                    byte[] lengthBytes = await ReadExactAsync(client, 4, cancellationToken);
+                    int length = BitConverter.ToInt32(lengthBytes, 0);
+                    if (length <= 0 || length > 2_000_000)
+                    {
+                        throw new InvalidDataException("Gecersiz kamera karesi boyutu: " + length);
+                    }
+
+                    byte[] frameBytes = await ReadExactAsync(client, length, cancellationToken);
+                    FrameReceived?.Invoke(this, new CameraFrameReceivedEventArgs(frameBytes));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex) when (ex is TimeoutException or IOException or EndOfStreamException or InvalidDataException)
+            {
+                YazLog("Kamera goruntu pipe yeniden denenecek: " + ex.Message);
+                try
+                {
+                    await Task.Delay(500, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static async Task<byte[]> ReadExactAsync(Stream stream, int length, CancellationToken cancellationToken)
+    {
+        byte[] buffer = new byte[length];
+        int offset = 0;
+        while (offset < length)
+        {
+            int read = await stream.ReadAsync(buffer.AsMemory(offset, length - offset), cancellationToken);
+            if (read == 0)
+            {
+                throw new EndOfStreamException();
+            }
+
+            offset += read;
+        }
+
+        return buffer;
+    }
+
+    private void EskiKameraKaresiniSil()
+    {
+        try
+        {
+            if (File.Exists(_legacyFramePath))
+            {
+                File.Delete(_legacyFramePath);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     private void YazLog(string? satir)
@@ -226,3 +345,13 @@ public sealed class PythonCameraWorker : IDisposable
 }
 
 public sealed record PythonDependencyCheckResult(bool Ok, string Message);
+
+public sealed class CameraFrameReceivedEventArgs : EventArgs
+{
+    public CameraFrameReceivedEventArgs(byte[] jpegBytes)
+    {
+        JpegBytes = jpegBytes;
+    }
+
+    public byte[] JpegBytes { get; }
+}

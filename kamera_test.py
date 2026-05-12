@@ -26,11 +26,11 @@ SAG_KULAK = 454
 KIRPMA_KARE = 2
 KALIBRASYON_SURE = 3
 PIPE_ADI = r'\\.\pipe\fokus_pipe'
+FRAME_PIPE_ADI = None
 KOK_DIZIN = os.path.dirname(os.path.abspath(__file__))
 KARAR_MOTORU_PROJE = os.path.join(KOK_DIZIN, "KararMotoru", "KararMotoru.csproj")
 KARAR_MOTORU_LOG = os.path.join(KOK_DIZIN, "karar_motoru.log")
 HEADLESS = False
-FRAME_OUTPUT = None
 FRAME_INTERVAL = 1 / 30
 ANALIZ_INTERVAL = 1 / 10
 son_frame_yazma = 0.0
@@ -63,14 +63,17 @@ kal_baslangic = None
 paylasilan_veri = {}
 veri_kilidi = threading.Lock()
 pipe_bagli = False
+frame_pipe = None
+frame_pipe_bagli = False
+frame_pipe_kilidi = threading.Lock()
 karar_motoru_proc = None
 karar_motoru_log = None
 
 def argumanlari_oku():
     parser = argparse.ArgumentParser(description="FOKUS kamera ve pipe isçisi")
     parser.add_argument("--headless", action="store_true", help="OpenCV penceresi acmadan calisir.")
-    parser.add_argument("--frame-output", help="Son kamera karesini atomik JPEG olarak bu yola yazar.")
     parser.add_argument("--pipe-name", default="fokus_pipe", help="Named pipe adi veya tam pipe yolu.")
+    parser.add_argument("--frame-pipe-name", help="WPF kamera onizlemesi icin named pipe adi veya tam pipe yolu.")
     parser.add_argument("--preview-fps", type=float, default=30, help="WPF onizleme JPEG yazma hizi.")
     parser.add_argument("--analysis-fps", type=float, default=10, help="MediaPipe analiz hizi.")
     return parser.parse_args()
@@ -78,34 +81,53 @@ def argumanlari_oku():
 def frame_yaz(frame):
     global son_frame_yazma
 
-    if not FRAME_OUTPUT:
+    if not FRAME_PIPE_ADI:
         return
 
     simdi = time.time()
     if simdi - son_frame_yazma < FRAME_INTERVAL:
         return
 
-    tmp_yol = f"{FRAME_OUTPUT}.{os.getpid()}.tmp"
+    basarili, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+    if not basarili:
+        return
+
+    jpeg_bytes = buffer.tobytes()
+    frame_pipe_gonder(jpeg_bytes)
+    son_frame_yazma = simdi
+
+def frame_pipe_gonder(jpeg_bytes):
+    global frame_pipe, frame_pipe_bagli
+
+    if not FRAME_PIPE_ADI:
+        return False
+
+    with frame_pipe_kilidi:
+        pipe = frame_pipe
+
+    if pipe is None:
+        return False
+
     try:
-        klasor = os.path.dirname(os.path.abspath(FRAME_OUTPUT))
-        if klasor:
-            os.makedirs(klasor, exist_ok=True)
-
-        basarili, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
-        if not basarili:
-            return
-
-        with open(tmp_yol, "wb") as dosya:
-            dosya.write(buffer.tobytes())
-        os.replace(tmp_yol, FRAME_OUTPUT)
-        son_frame_yazma = simdi
+        mesaj = len(jpeg_bytes).to_bytes(4, byteorder="little", signed=False) + jpeg_bytes
+        win32file.WriteFile(pipe, mesaj)
+        return True
+    except pywintypes.error:
+        print("Kamera goruntu pipe baglantisi kesildi, yeniden bekleniyor...")
     except Exception as e:
-        print(f"Kamera karesi yazilamadi: {e}")
-        try:
-            if os.path.exists(tmp_yol):
-                os.remove(tmp_yol)
-        except Exception:
-            pass
+        print(f"Kamera goruntu pipe hatasi: {e}")
+
+    with frame_pipe_kilidi:
+        if frame_pipe == pipe:
+            frame_pipe = None
+            frame_pipe_bagli = False
+
+    try:
+        win32file.CloseHandle(pipe)
+    except Exception:
+        pass
+
+    return False
 
 def analiz_modelini_yukle():
     global detector, detector_hazir, detector_hatasi, mp, python, vision
@@ -262,6 +284,57 @@ def pipe_sunucusu():
                     pass
             time.sleep(1)
 
+def frame_pipe_sunucusu():
+    global frame_pipe, frame_pipe_bagli
+
+    if not FRAME_PIPE_ADI:
+        return
+
+    print("Kamera goruntu pipe sunucusu baslatiliyor...")
+    while True:
+        pipe = None
+        try:
+            pipe = win32pipe.CreateNamedPipe(
+                FRAME_PIPE_ADI,
+                win32pipe.PIPE_ACCESS_OUTBOUND,
+                win32pipe.PIPE_TYPE_BYTE | win32pipe.PIPE_WAIT,
+                1, 1048576, 1048576, 0, None
+            )
+            print("WPF kamera istemcisi bekleniyor...")
+            try:
+                win32pipe.ConnectNamedPipe(pipe, None)
+            except pywintypes.error as e:
+                hata_kodu = getattr(e, "winerror", e.args[0] if e.args else None)
+                if hata_kodu != 535:  # ERROR_PIPE_CONNECTED
+                    raise
+
+            with frame_pipe_kilidi:
+                frame_pipe = pipe
+                frame_pipe_bagli = True
+
+            print("WPF kamera istemcisi baglandi!")
+            while True:
+                with frame_pipe_kilidi:
+                    bagli = frame_pipe_bagli and frame_pipe == pipe
+                if not bagli:
+                    break
+                time.sleep(0.2)
+
+        except Exception as e:
+            print(f"Kamera goruntu pipe hatasi: {e}")
+        finally:
+            with frame_pipe_kilidi:
+                if frame_pipe == pipe:
+                    frame_pipe = None
+                    frame_pipe_bagli = False
+
+            if pipe is not None:
+                try:
+                    win32file.CloseHandle(pipe)
+                except Exception:
+                    pass
+            time.sleep(0.5)
+
 def ear_hesapla(landmarks, goz_noktalari, w, h):
     nokta = lambda i: np.array([landmarks[i].x * w, landmarks[i].y * h])
     p1, p2, p3, p4, p5, p6 = [nokta(i) for i in goz_noktalari]
@@ -313,20 +386,26 @@ except ImportError:
 
 args = argumanlari_oku()
 HEADLESS = args.headless
-FRAME_OUTPUT = args.frame_output
 PIPE_ADI = args.pipe_name if args.pipe_name.startswith("\\\\.\\pipe\\") else rf'\\.\pipe\{args.pipe_name}'
+FRAME_PIPE_ADI = (
+    args.frame_pipe_name if args.frame_pipe_name and args.frame_pipe_name.startswith("\\\\.\\pipe\\")
+    else (rf'\\.\pipe\{args.frame_pipe_name}' if args.frame_pipe_name else None)
+)
 FRAME_INTERVAL = 1 / max(args.preview_fps, 1)
 ANALIZ_INTERVAL = 1 / max(args.analysis_fps, 1)
 if HEADLESS:
     print("Headless kamera modu aktif.")
-if FRAME_OUTPUT:
-    print(f"Kamera karesi yazilacak: {FRAME_OUTPUT}")
 print(f"Pipe adi: {PIPE_ADI}")
+if FRAME_PIPE_ADI:
+    print(f"Kamera goruntu pipe adi: {FRAME_PIPE_ADI}")
 print(f"Onizleme FPS: {args.preview_fps:.0f}, analiz FPS: {args.analysis_fps:.0f}")
 
 # Pipe sunucusunu model/kamera yuklenmeden once ac. C# istemcisi erken baglanabilsin.
 pipe_thread = threading.Thread(target=pipe_sunucusu, daemon=True)
 pipe_thread.start()
+if FRAME_PIPE_ADI:
+    frame_pipe_thread = threading.Thread(target=frame_pipe_sunucusu, daemon=True)
+    frame_pipe_thread.start()
 
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -391,6 +470,13 @@ while True:
             kal_gaze_listesi.append(gaze)
             kal_one_listesi.append(one_egim)
             kal_yana_listesi.append(yana_egim)
+
+            cv2.putText(frame, "KALIBRASYON", (w // 2 - 120, h // 2 - 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+            cv2.putText(frame, "Duz oturun, ekrana bakin", (w // 2 - 190, h // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            cv2.putText(frame, f"{max(kalan, 0)} saniye", (w // 2 - 70, h // 2 + 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
 
             with veri_kilidi:
                 paylasilan_veri.update({
