@@ -28,8 +28,12 @@ KALIBRASYON_SURE = 3
 PIPE_ADI = r'\\.\pipe\fokus_pipe'
 FRAME_PIPE_ADI = None
 KOK_DIZIN = os.path.dirname(os.path.abspath(__file__))
+LOG_DIZIN = os.environ.get("FOKUS_LOG_DIR") or os.path.join(KOK_DIZIN, "loglar")
+MODEL_DIZIN = os.environ.get("FOKUS_MODEL_DIR") or os.path.join(KOK_DIZIN, "modeller")
 KARAR_MOTORU_PROJE = os.path.join(KOK_DIZIN, "KararMotoru", "KararMotoru.csproj")
-KARAR_MOTORU_LOG = os.path.join(KOK_DIZIN, "karar_motoru.log")
+KARAR_MOTORU_LOG = os.path.join(LOG_DIZIN, "karar_motoru.log")
+MODEL_PATH = os.path.join(MODEL_DIZIN, "face_landmarker.task")
+MODEL_ASSET_PATH = os.path.join("modeller", "face_landmarker.task")
 HEADLESS = False
 FRAME_INTERVAL = 1 / 30
 ANALIZ_INTERVAL = 1 / 10
@@ -68,6 +72,11 @@ frame_pipe_bagli = False
 frame_pipe_kilidi = threading.Lock()
 karar_motoru_proc = None
 karar_motoru_log = None
+
+os.chdir(KOK_DIZIN)
+
+for klasor in (LOG_DIZIN, MODEL_DIZIN):
+    os.makedirs(klasor, exist_ok=True)
 
 def argumanlari_oku():
     parser = argparse.ArgumentParser(description="FOKUS kamera ve pipe isçisi")
@@ -141,7 +150,7 @@ def analiz_modelini_yukle():
         python = mp_python
         vision = mp_vision
 
-        model_path = "face_landmarker.task"
+        model_path = MODEL_PATH
         if not os.path.exists(model_path):
             import urllib.request
             print("Model indiriliyor...")
@@ -150,7 +159,7 @@ def analiz_modelini_yukle():
                 model_path
             )
 
-        base_options = python.BaseOptions(model_asset_path=model_path)
+        base_options = python.BaseOptions(model_asset_path=MODEL_ASSET_PATH)
         options = vision.FaceLandmarkerOptions(
             base_options=base_options,
             num_faces=1,

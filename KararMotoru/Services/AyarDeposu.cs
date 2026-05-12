@@ -7,8 +7,6 @@ namespace FokusKararMotoru.Services;
 
 public static class AyarDeposu
 {
-    private const string AyarDosyasiAdi = "karar_motoru_ayarlar.json";
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -16,7 +14,7 @@ public static class AyarDeposu
         PropertyNameCaseInsensitive = true
     };
 
-    public static string AyarDosyasiYolu(string projeKoku) => Path.Combine(projeKoku, AyarDosyasiAdi);
+    public static string AyarDosyasiYolu(string projeKoku) => UygulamaKlasorleri.AyarDosyasi(projeKoku);
 
     public static KararMotoruAyarlari YukleVeyaOlustur(string projeKoku)
     {

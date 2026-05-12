@@ -4,6 +4,7 @@ namespace FokusKararMotoru.Services;
 
 public sealed class MedyaYonetici
 {
+    private static readonly TimeSpan KomutZamanAsimi = TimeSpan.FromMilliseconds(750);
     private bool _bizDuraklattik;
 
     public void OdakDurumunuUygula(bool odakDusuk)
@@ -53,10 +54,7 @@ public sealed class MedyaYonetici
         try
         {
             GlobalSystemMediaTransportControlsSessionManager manager =
-                GlobalSystemMediaTransportControlsSessionManager.RequestAsync()
-                    .AsTask()
-                    .GetAwaiter()
-                    .GetResult();
+                ZamanSinirliBekle(GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask());
 
             GlobalSystemMediaTransportControlsSession? session = manager.GetCurrentSession();
             if (session is null)
@@ -65,12 +63,22 @@ public sealed class MedyaYonetici
             }
 
             return duraklat
-                ? session.TryPauseAsync().AsTask().GetAwaiter().GetResult()
-                : session.TryPlayAsync().AsTask().GetAwaiter().GetResult();
+                ? ZamanSinirliBekle(session.TryPauseAsync().AsTask())
+                : ZamanSinirliBekle(session.TryPlayAsync().AsTask());
         }
-        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or NotSupportedException or TypeLoadException)
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or NotSupportedException or TypeLoadException or TimeoutException or AggregateException)
         {
             return false;
         }
+    }
+
+    private static T ZamanSinirliBekle<T>(Task<T> task)
+    {
+        if (!task.Wait(KomutZamanAsimi))
+        {
+            throw new TimeoutException();
+        }
+
+        return task.GetAwaiter().GetResult();
     }
 }

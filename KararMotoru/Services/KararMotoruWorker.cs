@@ -18,6 +18,8 @@ public sealed class KararMotoruWorker : IDisposable
     private readonly MedyaYonetici _medyaYonetici = new();
     private readonly DurumYazici _durumYazici;
     private readonly object _syncRoot = new();
+    private readonly SemaphoreSlim _mudahaleSiralama = new(1, 1);
+    private readonly object _hataSyncRoot = new();
     private CancellationTokenSource? _cancellation;
     private Task? _workerTask;
     private GirdiIzleyici? _girdiIzleyici;
@@ -25,6 +27,8 @@ public sealed class KararMotoruWorker : IDisposable
     private KararMotoruState _sonState = new();
     private string? _sessionId;
     private DateTimeOffset _lastDbWrite = DateTimeOffset.MinValue;
+    private string? _sonOtomatikMudahaleHatasi;
+    private bool _karaListeAskida;
     private bool _disposed;
 
     public KararMotoruWorker(string projeKoku, KararMotoruAyarlari ayarlar, string pipeName = "fokus_pipe", FokusDb? database = null)
@@ -62,6 +66,7 @@ public sealed class KararMotoruWorker : IDisposable
             try
             {
                 _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
+                _karaListeAskida = false;
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
             {
@@ -88,6 +93,7 @@ public sealed class KararMotoruWorker : IDisposable
             {
                 _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
                 _medyaYonetici.DevamEttir();
+                _karaListeAskida = false;
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
             {
@@ -113,6 +119,7 @@ public sealed class KararMotoruWorker : IDisposable
         }
 
         _surecYonetici.SurecleriDondur(hedefler);
+        _karaListeAskida = true;
         string mesaj = $"{hedefler.Count} kara liste süreci askıya alındı.";
         Publish(_sonState with { DurumMesaji = mesaj, Hata = null });
         return mesaj;
@@ -127,6 +134,7 @@ public sealed class KararMotoruWorker : IDisposable
         }
 
         _surecYonetici.SurecleriDevamEttir(hedefler);
+        _karaListeAskida = false;
         string mesaj = "Kara liste süreçleri devam ettirildi.";
         Publish(_sonState with { DurumMesaji = mesaj, Hata = null });
         return mesaj;
@@ -141,6 +149,7 @@ public sealed class KararMotoruWorker : IDisposable
         }
 
         int sayi = _surecYonetici.SurecleriSonlandir(hedefler);
+        _karaListeAskida = false;
         string mesaj = sayi == 0
             ? "Sonlandırılacak çalışan süreç bulunamadı."
             : $"{sayi} kara liste süreci sonlandırıldı.";
@@ -200,6 +209,7 @@ public sealed class KararMotoruWorker : IDisposable
         {
             _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
             _medyaYonetici.DevamEttir();
+            _karaListeAskida = false;
             _girdiIzleyici?.Dispose();
             _girdiIzleyici = null;
             cancellation.Dispose();
@@ -260,6 +270,7 @@ public sealed class KararMotoruWorker : IDisposable
             catch (IOException ex)
             {
                 _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
+                _karaListeAskida = false;
                 Publish(_sonState with
                 {
                     PipeBagli = false,
@@ -413,27 +424,68 @@ public sealed class KararMotoruWorker : IDisposable
 
     private string? MudahaleUygula(OdakSonucu odakSonucu, SurecTaramaSonucu surecSonucu)
     {
+        string? bekleyenHata = OtomatikMudahaleHatasiniAl();
         if (!MudahaleAktif)
         {
-            return null;
+            return bekleyenHata;
         }
 
         try
         {
             if (odakSonucu.MudahaleGerekli)
             {
-                _surecYonetici.SurecleriDondur(surecSonucu.KaraListedekiSurecler);
+                if (!_karaListeAskida && surecSonucu.KaraListedekiSurecler.Count > 0)
+                {
+                    string[] hedefler = surecSonucu.KaraListedekiSurecler.ToArray();
+                    OtomatikMudahalePlanla(() => _surecYonetici.SurecleriDondur(hedefler));
+                    _karaListeAskida = true;
+                }
             }
-            else if (surecSonucu.KaraListedekiSurecler.Count > 0)
+            else if (_karaListeAskida)
             {
-                _surecYonetici.SurecleriDevamEttir(surecSonucu.KaraListedekiSurecler);
+                string[] hedefler = Ayarlar.KaraListe.ToArray();
+                OtomatikMudahalePlanla(() => _surecYonetici.SurecleriDevamEttir(hedefler));
+                _karaListeAskida = false;
             }
 
-            return null;
+            return bekleyenHata;
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
         {
             return "Müdahale hatası: " + ex.Message;
+        }
+    }
+
+    private void OtomatikMudahalePlanla(Action islem)
+    {
+        _ = Task.Run(async () =>
+        {
+            await _mudahaleSiralama.WaitAsync();
+            try
+            {
+                islem();
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+            {
+                lock (_hataSyncRoot)
+                {
+                    _sonOtomatikMudahaleHatasi = "MÃ¼dahale hatasÄ±: " + ex.Message;
+                }
+            }
+            finally
+            {
+                _mudahaleSiralama.Release();
+            }
+        });
+    }
+
+    private string? OtomatikMudahaleHatasiniAl()
+    {
+        lock (_hataSyncRoot)
+        {
+            string? hata = _sonOtomatikMudahaleHatasi;
+            _sonOtomatikMudahaleHatasi = null;
+            return hata;
         }
     }
 

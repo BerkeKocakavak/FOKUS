@@ -8,7 +8,6 @@ namespace FokusKararMotoru.Services;
 public sealed class PythonCameraWorker : IDisposable
 {
     private readonly string _projeKoku;
-    private readonly string _legacyFramePath;
     private Process? _process;
     private StreamWriter? _logWriter;
     private bool _disposed;
@@ -18,8 +17,7 @@ public sealed class PythonCameraWorker : IDisposable
         _projeKoku = projeKoku;
         PipeName = $"fokus_pipe_{Environment.ProcessId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
         FramePipeName = $"fokus_frame_pipe_{Environment.ProcessId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
-        _legacyFramePath = Path.Combine(_projeKoku, "camera_frame.jpg");
-        LogPath = Path.Combine(_projeKoku, "camera_worker.log");
+        LogPath = UygulamaKlasorleri.KameraLogDosyasi(_projeKoku);
     }
 
     public string PipeName { get; }
@@ -56,7 +54,6 @@ public sealed class PythonCameraWorker : IDisposable
 
         _logWriter?.Dispose();
         _logWriter = new StreamWriter(LogPath, false, Encoding.UTF8) { AutoFlush = true };
-        EskiKameraKaresiniSil();
 
         var startInfo = new ProcessStartInfo
         {
@@ -80,6 +77,8 @@ public sealed class PythonCameraWorker : IDisposable
         startInfo.ArgumentList.Add("--analysis-fps");
         startInfo.ArgumentList.Add(Math.Clamp(AnalysisFps, 1, 30).ToString(System.Globalization.CultureInfo.InvariantCulture));
         startInfo.Environment["FOKUS_KARAR_MOTORU_OTOMATIK"] = "0";
+        startInfo.Environment["FOKUS_LOG_DIR"] = UygulamaKlasorleri.Loglar(_projeKoku);
+        startInfo.Environment["FOKUS_MODEL_DIR"] = UygulamaKlasorleri.Modeller(_projeKoku);
         startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
         startInfo.Environment["PYTHONUNBUFFERED"] = "1";
 
@@ -158,7 +157,6 @@ public sealed class PythonCameraWorker : IDisposable
         if (process is null)
         {
             await StopFrameReaderAsync(timeout ?? TimeSpan.FromSeconds(2));
-            EskiKameraKaresiniSil();
             return;
         }
 
@@ -184,7 +182,6 @@ public sealed class PythonCameraWorker : IDisposable
         finally
         {
             await StopFrameReaderAsync(timeout ?? TimeSpan.FromSeconds(2));
-            EskiKameraKaresiniSil();
             process.Dispose();
             _process = null;
             _logWriter?.Dispose();
@@ -294,23 +291,6 @@ public sealed class PythonCameraWorker : IDisposable
         }
 
         return buffer;
-    }
-
-    private void EskiKameraKaresiniSil()
-    {
-        try
-        {
-            if (File.Exists(_legacyFramePath))
-            {
-                File.Delete(_legacyFramePath);
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
     }
 
     private void YazLog(string? satir)

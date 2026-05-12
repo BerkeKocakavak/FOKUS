@@ -26,7 +26,7 @@ public sealed class GirdiIzleyici : IDisposable
 
         lock (_kilit)
         {
-            EskiOlaylariTemizle(baslangic);
+            PencereDisiOlaylariTemizle(baslangic);
             double fareMesafesi = _fareOlaylari.Sum(olay => olay.Mesafe);
             double dakikaCarpani = 60.0 / Math.Max(1, pencereSaniye);
 
@@ -95,7 +95,7 @@ public sealed class GirdiIzleyici : IDisposable
         }
     }
 
-    private void EskiOlaylariTemizle(DateTimeOffset baslangic)
+    private void PencereDisiOlaylariTemizle(DateTimeOffset baslangic)
     {
         while (_tusOlaylari.Count > 0 && _tusOlaylari.Peek() < baslangic)
         {

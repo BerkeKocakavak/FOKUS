@@ -18,8 +18,8 @@ public sealed class DurumYazici
 
     public DurumYazici(string projeKoku)
     {
-        _aktifOdakPath = Path.Combine(projeKoku, "aktif_odak.txt");
-        _durumPath = Path.Combine(projeKoku, "karar_motoru_durum.json");
+        _aktifOdakPath = UygulamaKlasorleri.AktifOdakDosyasi(projeKoku);
+        _durumPath = UygulamaKlasorleri.KararMotoruDurumDosyasi(projeKoku);
     }
 
     public void Yaz(

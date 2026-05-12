@@ -12,7 +12,7 @@ public sealed class FokusDb
 
     public FokusDb(string projeKoku)
     {
-        DbPath = Path.Combine(projeKoku, "fokus.db");
+        DbPath = UygulamaKlasorleri.VeritabaniDosyasi(projeKoku);
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = DbPath,

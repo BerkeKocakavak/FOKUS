@@ -157,12 +157,10 @@ public static class SelfTest
         }
         finally
         {
-            foreach (string file in Directory.GetFiles(tempDir))
+            if (Directory.Exists(tempDir))
             {
-                File.Delete(file);
+                Directory.Delete(tempDir, recursive: true);
             }
-
-            Directory.Delete(tempDir);
         }
     }
 

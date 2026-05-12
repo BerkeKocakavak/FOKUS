@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private DateTimeOffset _sonUyariZamani = DateTimeOffset.MinValue;
     private DateTimeOffset _sessionStart = DateTimeOffset.Now;
     private DateTimeOffset? _lastStateTime;
+    private DateTimeOffset? _pauseStartedAt;
     private DateTimeOffset? _uykuBaslangic;
     private FocusAlertWindow? _uyariPenceresi;
     private FocusOverlayWindow? _overlayWindow;
@@ -38,6 +39,7 @@ public partial class MainWindow : Window
     private int _lastFocusScore = 100;
     private double _focusScoreTotal;
     private double _lowFocusSeconds;
+    private TimeSpan _pausedDuration = TimeSpan.Zero;
     private bool _kapaniyor;
     private bool _kapanisTamamlandi;
     private bool _baslatiliyor;
@@ -451,9 +453,7 @@ public partial class MainWindow : Window
 
     private void DetayOturumunuGuncelle()
     {
-        TimeSpan sure = _sessionSamples == 0
-            ? TimeSpan.Zero
-            : DateTimeOffset.Now - _sessionStart;
+        TimeSpan sure = _sessionSamples == 0 ? TimeSpan.Zero : AktifOturumSuresi();
         double ortalama = _sessionSamples == 0 ? 0 : _focusScoreTotal / _sessionSamples;
         SessionDurationText.Text = sure.TotalHours >= 1
             ? sure.ToString(@"hh\:mm\:ss", CultureInfo.CurrentCulture)
@@ -626,8 +626,24 @@ public partial class MainWindow : Window
 
     private void DuraklatmaUiGuncelle(bool aktif)
     {
+        if (_duraklatildi != aktif)
+        {
+            DateTimeOffset simdi = DateTimeOffset.Now;
+            if (aktif)
+            {
+                _pauseStartedAt = simdi;
+            }
+            else if (_pauseStartedAt is DateTimeOffset baslangic)
+            {
+                _pausedDuration += simdi - baslangic;
+                _pauseStartedAt = null;
+                _lastStateTime = null;
+            }
+        }
+
         _duraklatildi = aktif;
         PauseButton.Content = aktif ? "Devam et" : "Ara ver";
+        DetayOturumunuGuncelle();
     }
 
     private void PythonLogGoster(string mesaj)
@@ -672,11 +688,13 @@ public partial class MainWindow : Window
     {
         _sessionStart = DateTimeOffset.Now;
         _lastStateTime = null;
+        _pauseStartedAt = null;
         _sessionSamples = 0;
         _minimumFocus = 100;
         _lastFocusScore = 100;
         _focusScoreTotal = 0;
         _lowFocusSeconds = 0;
+        _pausedDuration = TimeSpan.Zero;
         _uykuBaslangic = null;
         _odakGecmisi.Clear();
         OdakGecmisiniCiz();
@@ -684,6 +702,19 @@ public partial class MainWindow : Window
         PenaltyList.ItemsSource = new[] { "Ceza yok" };
         BlacklistText.Text = "Yok";
         HataGoster(null);
+    }
+
+    private TimeSpan AktifOturumSuresi()
+    {
+        DateTimeOffset simdi = DateTimeOffset.Now;
+        TimeSpan duraklama = _pausedDuration;
+        if (_pauseStartedAt is DateTimeOffset baslangic)
+        {
+            duraklama += simdi - baslangic;
+        }
+
+        TimeSpan sure = simdi - _sessionStart - duraklama;
+        return sure > TimeSpan.Zero ? sure : TimeSpan.Zero;
     }
 
     private static string KaraListeOzeti(SurecTaramaSonucu? sonuc)

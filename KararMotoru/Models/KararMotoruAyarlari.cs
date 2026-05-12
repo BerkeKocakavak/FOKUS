@@ -48,10 +48,6 @@ public sealed class KararMotoruAyarlari
 
     public bool KaraListeMudahalesiAktif { get; set; }
 
-    public double BeyazListeAktifkenKaraListeCezaKatsayisi { get; set; } = 0.45;
-
-    public int[] KaraListeCezaBasamaklari { get; set; } = [0, 30, 50, 65, 75, 90, 100];
-
     public string[] KaraListe { get; set; } =
     [
         "steam",
@@ -101,11 +97,16 @@ public sealed class KararMotoruAyarlari
         PosturEsigi = Math.Clamp(PosturEsigi, 0, 60);
         PosturCezaKatsayisi = Math.Clamp(PosturCezaKatsayisi, 0, 5);
         PosturCezaTavani = Math.Clamp(PosturCezaTavani, 0, 60);
-        BeyazListeAktifkenKaraListeCezaKatsayisi = Math.Clamp(BeyazListeAktifkenKaraListeCezaKatsayisi, 0, 1);
+        KaraListe = ListeyiTemizle(KaraListe);
+        BeyazListe = ListeyiTemizle(BeyazListe);
+    }
 
-        if (KaraListeCezaBasamaklari.Length == 0)
-        {
-            KaraListeCezaBasamaklari = [0, 30, 50, 65, 75, 90, 100];
-        }
+    private static string[] ListeyiTemizle(IEnumerable<string> liste)
+    {
+        return liste
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 }

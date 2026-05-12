@@ -136,8 +136,6 @@ public partial class SettingsWindow : Window
             PosturCezaTavani = kaynak.PosturCezaTavani,
             SadecePencereliKaraListeSurecleri = kaynak.SadecePencereliKaraListeSurecleri,
             KaraListeMudahalesiAktif = kaynak.KaraListeMudahalesiAktif,
-            BeyazListeAktifkenKaraListeCezaKatsayisi = kaynak.BeyazListeAktifkenKaraListeCezaKatsayisi,
-            KaraListeCezaBasamaklari = kaynak.KaraListeCezaBasamaklari.ToArray(),
             KaraListe = kaynak.KaraListe.ToArray(),
             BeyazListe = kaynak.BeyazListe.ToArray()
         };

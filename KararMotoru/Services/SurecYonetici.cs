@@ -5,6 +5,9 @@ namespace FokusKararMotoru.Services;
 
 public sealed class SurecYonetici
 {
+    private readonly object _syncRoot = new();
+    private readonly HashSet<int> _askidakiProcessIds = new();
+
     private static readonly HashSet<string> KritikSurecler = new(StringComparer.OrdinalIgnoreCase)
     {
         "explorer", "csrss", "wininit", "smss", "services", "lsass", "svchost", "devenv", "KararMotoru"
@@ -18,25 +21,19 @@ public sealed class SurecYonetici
 
     public void SurecleriDondur(IEnumerable<string> karaListedekiSurecler)
     {
-        foreach (string surecAdi in karaListedekiSurecler)
+        lock (_syncRoot)
         {
-            if (KritikSurecler.Contains(surecAdi))
+            foreach (string surecAdi in karaListedekiSurecler)
             {
-                continue;
-            }
-
-            Process[] processes = Process.GetProcessesByName(surecAdi);
-            foreach (Process process in processes)
-            {
-                Kucult(process);
-                foreach (ProcessThread thread in process.Threads)
+                if (KritikSurecler.Contains(surecAdi))
                 {
-                    IntPtr ptrOpenThread = OpenThread(ThreadAccess.SuspendResume, false, (uint)thread.Id);
-                    if (ptrOpenThread != IntPtr.Zero)
-                    {
-                        SuspendThread(ptrOpenThread);
-                        CloseHandle(ptrOpenThread);
-                    }
+                    continue;
+                }
+
+                Process[] processes = Process.GetProcessesByName(surecAdi);
+                foreach (Process process in processes)
+                {
+                    SureciDondur(process);
                 }
             }
         }
@@ -44,21 +41,23 @@ public sealed class SurecYonetici
 
     public void SurecleriDevamEttir(IEnumerable<string> karaListedekiSurecler)
     {
-        foreach (string surecAdi in karaListedekiSurecler)
+        lock (_syncRoot)
         {
-            Process[] processes = Process.GetProcessesByName(surecAdi);
-            foreach (Process process in processes)
+            foreach (string surecAdi in karaListedekiSurecler)
             {
-                foreach (ProcessThread thread in process.Threads)
+                if (KritikSurecler.Contains(surecAdi))
                 {
-                    IntPtr ptrOpenThread = OpenThread(ThreadAccess.SuspendResume, false, (uint)thread.Id);
-                    if (ptrOpenThread != IntPtr.Zero)
-                    {
-                        ResumeThread(ptrOpenThread);
-                        CloseHandle(ptrOpenThread);
-                    }
+                    continue;
+                }
+
+                Process[] processes = Process.GetProcessesByName(surecAdi);
+                foreach (Process process in processes)
+                {
+                    SureciDevamEttir(process);
                 }
             }
+
+            AskidakiBitmisSurecleriTemizle();
         }
     }
 
@@ -86,6 +85,124 @@ public sealed class SurecYonetici
         }
 
         return sayi;
+    }
+
+    private void SureciDondur(Process process)
+    {
+        try
+        {
+            if (process.HasExited || _askidakiProcessIds.Contains(process.Id))
+            {
+                return;
+            }
+
+            Kucult(process);
+            foreach (ProcessThread thread in process.Threads)
+            {
+                IntPtr ptrOpenThread = OpenThread(ThreadAccess.SuspendResume, false, (uint)thread.Id);
+                if (ptrOpenThread == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    SuspendThread(ptrOpenThread);
+                }
+                finally
+                {
+                    CloseHandle(ptrOpenThread);
+                }
+            }
+
+            _askidakiProcessIds.Add(process.Id);
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+        }
+    }
+
+    private void SureciDevamEttir(Process process)
+    {
+        try
+        {
+            if (process.HasExited)
+            {
+                _askidakiProcessIds.Remove(process.Id);
+                return;
+            }
+
+            bool takipliSurecVar = _askidakiProcessIds.Count > 0;
+            if (takipliSurecVar && !_askidakiProcessIds.Contains(process.Id))
+            {
+                return;
+            }
+
+            foreach (ProcessThread thread in process.Threads)
+            {
+                IntPtr ptrOpenThread = OpenThread(ThreadAccess.SuspendResume, false, (uint)thread.Id);
+                if (ptrOpenThread == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    for (int deneme = 0; deneme < 16; deneme++)
+                    {
+                        int oncekiSayac = ResumeThread(ptrOpenThread);
+                        if (oncekiSayac <= 1)
+                        {
+                            break;
+                        }
+                    }
+                }
+                finally
+                {
+                    CloseHandle(ptrOpenThread);
+                }
+            }
+
+            _askidakiProcessIds.Remove(process.Id);
+        }
+        catch (InvalidOperationException)
+        {
+            _askidakiProcessIds.Remove(process.Id);
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+        }
+    }
+
+    private void AskidakiBitmisSurecleriTemizle()
+    {
+        if (_askidakiProcessIds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (int processId in _askidakiProcessIds.ToArray())
+        {
+            try
+            {
+                using Process process = Process.GetProcessById(processId);
+                if (process.HasExited)
+                {
+                    _askidakiProcessIds.Remove(processId);
+                }
+            }
+            catch (ArgumentException)
+            {
+                _askidakiProcessIds.Remove(processId);
+            }
+            catch (InvalidOperationException)
+            {
+                _askidakiProcessIds.Remove(processId);
+            }
+        }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
