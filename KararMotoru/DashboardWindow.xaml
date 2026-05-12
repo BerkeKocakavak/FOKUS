@@ -1,0 +1,231 @@
+<Window x:Class="FokusKararMotoru.DashboardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FOKUS İstatistikler"
+        Width="1040"
+        Height="740"
+        MinWidth="860"
+        MinHeight="580"
+        Background="#F4F7FB"
+        Foreground="{StaticResource TextBrush}">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,0,0,14">
+            <Button DockPanel.Dock="Right"
+                    Content="Yenile"
+                    Click="RefreshButton_Click"/>
+            <StackPanel>
+                <TextBlock Text="İstatistikler"
+                           FontSize="26"
+                           FontWeight="SemiBold"/>
+                <TextBlock x:Name="DashboardStatusText"
+                           Margin="0,3,0,0"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="İstatistikler yükleniyor"/>
+            </StackPanel>
+        </DockPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="260"/>
+                    <RowDefinition Height="260"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <UniformGrid Columns="4">
+                    <Border Margin="0,0,10,10"
+                            Padding="14"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            Background="{StaticResource PanelBrush}"
+                            CornerRadius="8">
+                        <StackPanel>
+                            <TextBlock Text="Oturum"
+                                       Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock x:Name="SessionCountText"
+                                       Margin="0,8,0,0"
+                                       FontSize="28"
+                                       FontWeight="SemiBold"
+                                       Text="0"/>
+                            <TextBlock x:Name="TotalDurationText"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Text="00:00"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Margin="0,0,10,10"
+                            Padding="14"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            Background="{StaticResource PanelBrush}"
+                            CornerRadius="8">
+                        <StackPanel>
+                            <TextBlock Text="Ortalama odak"
+                                       Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock x:Name="AverageFocusText"
+                                       Margin="0,8,0,0"
+                                       FontSize="28"
+                                       FontWeight="SemiBold"
+                                       Text="-"/>
+                            <TextBlock x:Name="FocusRangeText"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Text="Min - / Maks -"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Margin="0,0,10,10"
+                            Padding="14"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            Background="{StaticResource PanelBrush}"
+                            CornerRadius="8">
+                        <StackPanel>
+                            <TextBlock Text="Düşük odak"
+                                       Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock x:Name="LowFocusRateText"
+                                       Margin="0,8,0,0"
+                                       FontSize="28"
+                                       FontWeight="SemiBold"
+                                       Text="0%"/>
+                            <TextBlock x:Name="RiskSamplesText"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Text="0 örnek"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Margin="0,0,0,10"
+                            Padding="14"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            Background="{StaticResource PanelBrush}"
+                            CornerRadius="8">
+                        <StackPanel>
+                            <TextBlock Text="Son veri"
+                                       Foreground="{StaticResource MutedTextBrush}"/>
+                            <TextBlock x:Name="LastSampleText"
+                                       Margin="0,8,0,0"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       Text="-"/>
+                            <TextBlock x:Name="InputAverageText"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Text="Girdi -"/>
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+
+                <Grid Grid.Row="1" Margin="0,4,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Padding="14"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            Background="{StaticResource PanelBrush}"
+                            CornerRadius="8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <DockPanel Margin="0,0,0,8">
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="Son örnekler"
+                                           Foreground="{StaticResource MutedTextBrush}"/>
+                                <TextBlock Text="Odak Trendi"
+                                           FontWeight="SemiBold"/>
+                            </DockPanel>
+                            <Border Grid.Row="1"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1"
+                                    Background="#FBFDFF"
+                                    CornerRadius="6">
+                                <Canvas x:Name="TrendCanvas"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="1"
+                            Margin="14,0,0,0"
+                            Padding="14"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            Background="{StaticResource PanelBrush}"
+                            CornerRadius="8">
+                        <StackPanel>
+                            <TextBlock Text="Ceza Dağılımı"
+                                       FontWeight="SemiBold"/>
+                            <ListBox x:Name="PenaltyList"
+                                     Margin="0,10,0,0"
+                                     BorderThickness="0"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Grid.Row="2" Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Padding="14"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            Background="{StaticResource PanelBrush}"
+                            CornerRadius="8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Günlük Odak Ortalaması"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,8"/>
+                            <Border Grid.Row="1"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    BorderThickness="1"
+                                    Background="#FBFDFF"
+                                    CornerRadius="6">
+                                <Canvas x:Name="DailyCanvas"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="1"
+                            Margin="14,0,0,0"
+                            Padding="14"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            Background="{StaticResource PanelBrush}"
+                            CornerRadius="8">
+                        <StackPanel>
+                            <TextBlock Text="Kara Liste"
+                                       FontWeight="SemiBold"/>
+                            <ListBox x:Name="BlacklistList"
+                                     Margin="0,10,0,0"
+                                     BorderThickness="0"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Border Grid.Row="3"
+                        Padding="14"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1"
+                        Background="{StaticResource PanelBrush}"
+                        CornerRadius="8">
+                    <StackPanel>
+                        <TextBlock Text="Günlük Özet"
+                                   FontWeight="SemiBold"/>
+                        <ListBox x:Name="DailySummaryList"
+                                 Margin="0,10,0,0"
+                                 BorderThickness="0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</Window>

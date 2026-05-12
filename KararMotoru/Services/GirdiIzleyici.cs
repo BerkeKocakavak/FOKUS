@@ -66,8 +66,10 @@ public sealed class GirdiIzleyici : IDisposable
         {
             for (int tus = 8; tus < _oncekiTusDurumlari.Length; tus++)
             {
-                bool basili = (GetAsyncKeyState(tus) & 0x8000) != 0;
-                if (basili && !_oncekiTusDurumlari[tus])
+                short durum = GetAsyncKeyState(tus);
+                bool basili = (durum & 0x8000) != 0;
+                bool yeniBasma = (durum & 0x0001) != 0 || (basili && !_oncekiTusDurumlari[tus]);
+                if (yeniBasma)
                 {
                     _tusOlaylari.Enqueue(simdi);
                     _sonAktivite = simdi;

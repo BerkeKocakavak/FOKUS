@@ -25,6 +25,17 @@ public partial class FocusOverlayWindow : Window
 
     public void Update(KararMotoruState state, int odakEsigi)
     {
+        if (state.Duraklatildi)
+        {
+            ScoreText.Text = "--";
+            DetailText.Text = "Ara";
+            Brush duraklatmaRengi = new SolidColorBrush(Color.FromRgb(100, 112, 137));
+            ScoreText.Foreground = duraklatmaRengi;
+            StatusDot.Fill = duraklatmaRengi;
+            RootBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(203, 213, 225));
+            return;
+        }
+
         int puan = state.Odak?.Puan ?? 100;
         ScoreText.Text = puan.ToString();
         DetailText.Text = state.PipeBagli

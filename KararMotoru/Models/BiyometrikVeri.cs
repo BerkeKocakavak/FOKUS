@@ -48,4 +48,5 @@ public sealed class BiyometrikVeri
 
     [JsonPropertyName("analiz_durumu")]
     public string? AnalizDurumu { get; set; }
+
 }

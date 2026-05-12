@@ -40,31 +40,13 @@ public sealed class SurecTarayici
 
         string? onPlanSurec = OnPlanSurecAdiAl();
         bool onPlanBeyazListede = onPlanSurec is not null && beyazListe.Contains(onPlanSurec);
-        int ceza = KaraListeCezasiHesapla(bulunanKaraListe.Count, ayarlar.KaraListeCezaBasamaklari);
-
-        if (onPlanBeyazListede && ceza > 0)
-        {
-            ceza = (int)Math.Round(ceza * ayarlar.BeyazListeAktifkenKaraListeCezaKatsayisi);
-        }
-
         return new SurecTaramaSonucu
         {
             KaraListedekiSurecler = bulunanKaraListe.ToArray(),
             OnPlanSurec = onPlanSurec,
             OnPlanBeyazListede = onPlanBeyazListede,
-            KaraListeCezasi = ceza
+            KaraListeCezasi = 0
         };
-    }
-
-    private static int KaraListeCezasiHesapla(int surecSayisi, int[] basamaklar)
-    {
-        if (surecSayisi <= 0)
-        {
-            return 0;
-        }
-
-        int index = Math.Min(surecSayisi, basamaklar.Length - 1);
-        return Math.Clamp(basamaklar[index], 0, 100);
     }
 
     private static string? OnPlanSurecAdiAl()

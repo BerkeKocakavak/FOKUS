@@ -16,6 +16,8 @@ public sealed class KararMotoruAyarlari
 
     public int HareketsizlikUyariSaniyesi { get; set; } = 45;
 
+    public string UyariMesajiNotu { get; set; } = "Kısa bir toparlanma molası verip tekrar odaklan.";
+
     public int KameraOnizlemeFps { get; set; } = 30;
 
     public int KameraAnalizFps { get; set; } = 10;
@@ -43,6 +45,8 @@ public sealed class KararMotoruAyarlari
     public double PosturCezaTavani { get; set; } = 20;
 
     public bool SadecePencereliKaraListeSurecleri { get; set; } = true;
+
+    public bool KaraListeMudahalesiAktif { get; set; }
 
     public double BeyazListeAktifkenKaraListeCezaKatsayisi { get; set; } = 0.45;
 
@@ -81,6 +85,9 @@ public sealed class KararMotoruAyarlari
         GirdiOrneklemeMs = Math.Clamp(GirdiOrneklemeMs, 30, 1000);
         AktivitePenceresiSaniye = Math.Clamp(AktivitePenceresiSaniye, 10, 600);
         HareketsizlikUyariSaniyesi = Math.Clamp(HareketsizlikUyariSaniyesi, 5, 3600);
+        UyariMesajiNotu = string.IsNullOrWhiteSpace(UyariMesajiNotu)
+            ? "Kısa bir toparlanma molası verip tekrar odaklan."
+            : UyariMesajiNotu.Trim();
         KameraOnizlemeFps = Math.Clamp(KameraOnizlemeFps, 5, 60);
         KameraAnalizFps = Math.Clamp(KameraAnalizFps, 1, 30);
         KlavyeDakikaBeklenen = Math.Max(1, KlavyeDakikaBeklenen);

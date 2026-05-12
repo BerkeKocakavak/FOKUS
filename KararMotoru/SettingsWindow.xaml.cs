@@ -25,6 +25,8 @@ public partial class SettingsWindow : Window
         AnalysisFpsTextBox.Text = _ayarlar.KameraAnalizFps.ToString(CultureInfo.CurrentCulture);
         KeyboardExpectedTextBox.Text = _ayarlar.KlavyeDakikaBeklenen.ToString("0.##", CultureInfo.CurrentCulture);
         MouseExpectedTextBox.Text = _ayarlar.FarePikselDakikaBeklenen.ToString("0.##", CultureInfo.CurrentCulture);
+        AlertNoteTextBox.Text = _ayarlar.UyariMesajiNotu;
+        InterventionEnabledCheckBox.IsChecked = _ayarlar.KaraListeMudahalesiAktif;
         EarPenaltyFactorTextBox.Text = _ayarlar.EarCezaKatsayisi.ToString("0.##", CultureInfo.CurrentCulture);
         EarPenaltyCapTextBox.Text = _ayarlar.EarCezaTavani.ToString("0.##", CultureInfo.CurrentCulture);
         GazeThresholdTextBox.Text = _ayarlar.GazeEsigi.ToString("0.###", CultureInfo.CurrentCulture);
@@ -69,6 +71,8 @@ public partial class SettingsWindow : Window
         yeni.KameraAnalizFps = analysisFps;
         yeni.KlavyeDakikaBeklenen = klavyeBeklenen;
         yeni.FarePikselDakikaBeklenen = fareBeklenen;
+        yeni.UyariMesajiNotu = AlertNoteTextBox.Text;
+        yeni.KaraListeMudahalesiAktif = InterventionEnabledCheckBox.IsChecked == true;
         yeni.EarCezaKatsayisi = earCezaKatsayisi;
         yeni.EarCezaTavani = earCezaTavani;
         yeni.GazeEsigi = gazeEsigi;
@@ -116,6 +120,7 @@ public partial class SettingsWindow : Window
             GirdiOrneklemeMs = kaynak.GirdiOrneklemeMs,
             AktivitePenceresiSaniye = kaynak.AktivitePenceresiSaniye,
             HareketsizlikUyariSaniyesi = kaynak.HareketsizlikUyariSaniyesi,
+            UyariMesajiNotu = kaynak.UyariMesajiNotu,
             KameraOnizlemeFps = kaynak.KameraOnizlemeFps,
             KameraAnalizFps = kaynak.KameraAnalizFps,
             KlavyeDakikaBeklenen = kaynak.KlavyeDakikaBeklenen,
@@ -130,6 +135,7 @@ public partial class SettingsWindow : Window
             PosturCezaKatsayisi = kaynak.PosturCezaKatsayisi,
             PosturCezaTavani = kaynak.PosturCezaTavani,
             SadecePencereliKaraListeSurecleri = kaynak.SadecePencereliKaraListeSurecleri,
+            KaraListeMudahalesiAktif = kaynak.KaraListeMudahalesiAktif,
             BeyazListeAktifkenKaraListeCezaKatsayisi = kaynak.BeyazListeAktifkenKaraListeCezaKatsayisi,
             KaraListeCezaBasamaklari = kaynak.KaraListeCezaBasamaklari.ToArray(),
             KaraListe = kaynak.KaraListe.ToArray(),

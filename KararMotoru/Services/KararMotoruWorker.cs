@@ -15,6 +15,7 @@ public sealed class KararMotoruWorker : IDisposable
     private readonly SurecYonetici _surecYonetici = new();
     private readonly SurecTarayici _surecTarayici = new();
     private readonly OdakPuaniMotoru _odakMotoru = new();
+    private readonly MedyaYonetici _medyaYonetici = new();
     private readonly DurumYazici _durumYazici;
     private readonly object _syncRoot = new();
     private CancellationTokenSource? _cancellation;
@@ -41,6 +42,8 @@ public sealed class KararMotoruWorker : IDisposable
 
     public bool MudahaleAktif { get; set; }
 
+    public bool Duraklatildi { get; private set; }
+
     public bool Calisiyor => _workerTask is { IsCompleted: false };
 
     public void AyarlariGuncelle(KararMotoruAyarlari ayarlar)
@@ -62,7 +65,7 @@ public sealed class KararMotoruWorker : IDisposable
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
             {
-                hata = "Mudahale kapatilirken hata: " + ex.Message;
+                hata = "Müdahale kapatılırken hata: " + ex.Message;
             }
         }
 
@@ -70,8 +73,79 @@ public sealed class KararMotoruWorker : IDisposable
         {
             MudahaleAktif = aktif,
             Hata = hata,
-            DurumMesaji = aktif ? "Mudahale acik" : "Mudahale kapali"
+            DurumMesaji = aktif ? "Müdahale açık" : "Müdahale kapalı"
         });
+    }
+
+    public void DuraklatmaDurumuAyarla(bool aktif)
+    {
+        Duraklatildi = aktif;
+        string? hata = null;
+
+        if (aktif)
+        {
+            try
+            {
+                _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
+                _medyaYonetici.DevamEttir();
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+            {
+                hata = "Duraklatılırken süreçler devam ettirilemedi: " + ex.Message;
+            }
+        }
+
+        Publish(_sonState with
+        {
+            Duraklatildi = aktif,
+            MudahaleAktif = aktif ? false : MudahaleAktif,
+            Hata = hata,
+            DurumMesaji = aktif ? "Duraklatma modu aktif" : "Takip devam ediyor"
+        });
+    }
+
+    public string ManuelAskıyaAl()
+    {
+        IReadOnlyList<string> hedefler = AktifKaraListeHedefleri();
+        if (hedefler.Count == 0)
+        {
+            return "Askıya alınacak kara liste süreci yok.";
+        }
+
+        _surecYonetici.SurecleriDondur(hedefler);
+        string mesaj = $"{hedefler.Count} kara liste süreci askıya alındı.";
+        Publish(_sonState with { DurumMesaji = mesaj, Hata = null });
+        return mesaj;
+    }
+
+    public string ManuelDevamEttir()
+    {
+        IReadOnlyList<string> hedefler = AktifKaraListeHedefleri();
+        if (hedefler.Count == 0)
+        {
+            hedefler = Ayarlar.KaraListe;
+        }
+
+        _surecYonetici.SurecleriDevamEttir(hedefler);
+        string mesaj = "Kara liste süreçleri devam ettirildi.";
+        Publish(_sonState with { DurumMesaji = mesaj, Hata = null });
+        return mesaj;
+    }
+
+    public string ManuelSonlandir()
+    {
+        IReadOnlyList<string> hedefler = AktifKaraListeHedefleri();
+        if (hedefler.Count == 0)
+        {
+            return "Sonlandırılacak kara liste süreci yok.";
+        }
+
+        int sayi = _surecYonetici.SurecleriSonlandir(hedefler);
+        string mesaj = sayi == 0
+            ? "Sonlandırılacak çalışan süreç bulunamadı."
+            : $"{sayi} kara liste süreci sonlandırıldı.";
+        Publish(_sonState with { DurumMesaji = mesaj, Hata = null });
+        return mesaj;
     }
 
     public void Start()
@@ -102,7 +176,6 @@ public sealed class KararMotoruWorker : IDisposable
         cancellation.Cancel();
         DisposeActivePipe();
 
-        bool tamamlandi = workerTask is null;
         try
         {
             if (workerTask is not null)
@@ -110,33 +183,27 @@ public sealed class KararMotoruWorker : IDisposable
                 Task tamamlanma = await Task.WhenAny(workerTask, Task.Delay(timeout ?? TimeSpan.FromSeconds(2)));
                 if (tamamlanma == workerTask)
                 {
-                    tamamlandi = true;
                     await workerTask;
                 }
             }
         }
         catch (OperationCanceledException)
         {
-            tamamlandi = true;
         }
         catch (ObjectDisposedException)
         {
-            tamamlandi = true;
         }
         catch (IOException)
         {
-            tamamlandi = true;
         }
         finally
         {
             _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
+            _medyaYonetici.DevamEttir();
             _girdiIzleyici?.Dispose();
             _girdiIzleyici = null;
-            if (tamamlandi)
-            {
-                cancellation.Dispose();
-                _workerTask = null;
-            }
+            cancellation.Dispose();
+            _workerTask = null;
 
             if (_sessionId is not null)
             {
@@ -145,7 +212,8 @@ public sealed class KararMotoruWorker : IDisposable
             }
 
             _cancellation = null;
-            Publish(_sonState with { PipeBagli = false, DurumMesaji = "Karar motoru durduruldu" });
+            Duraklatildi = false;
+            Publish(_sonState with { PipeBagli = false, Duraklatildi = false, DurumMesaji = "Karar motoru durduruldu" });
         }
     }
 
@@ -167,8 +235,9 @@ public sealed class KararMotoruWorker : IDisposable
     {
         Publish(new KararMotoruState
         {
+            Duraklatildi = Duraklatildi,
             MudahaleAktif = MudahaleAktif,
-            DurumMesaji = "Python pipe baglantisi bekleniyor"
+            DurumMesaji = "Python pipe bağlantısı bekleniyor"
         });
 
         while (!cancellationToken.IsCancellationRequested)
@@ -182,8 +251,9 @@ public sealed class KararMotoruWorker : IDisposable
                 Publish(_sonState with
                 {
                     PipeBagli = false,
+                    Duraklatildi = Duraklatildi,
                     MudahaleAktif = MudahaleAktif,
-                    DurumMesaji = "Pipe hazir degil; yeniden denenecek"
+                    DurumMesaji = "Pipe hazır değil; yeniden denenecek"
                 });
                 await Task.Delay(1000, cancellationToken);
             }
@@ -193,11 +263,20 @@ public sealed class KararMotoruWorker : IDisposable
                 Publish(_sonState with
                 {
                     PipeBagli = false,
+                    Duraklatildi = Duraklatildi,
                     MudahaleAktif = MudahaleAktif,
-                    DurumMesaji = "Pipe baglantisi kesildi",
+                    DurumMesaji = "Pipe bağlantısı kesildi",
                     Hata = ex.Message
                 });
                 await Task.Delay(1000, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
             }
         }
     }
@@ -213,8 +292,9 @@ public sealed class KararMotoruWorker : IDisposable
             Publish(_sonState with
             {
                 PipeBagli = true,
+                Duraklatildi = Duraklatildi,
                 MudahaleAktif = MudahaleAktif,
-                DurumMesaji = "Pipe baglandi",
+                DurumMesaji = "Pipe bağlandı",
                 Hata = null
             });
 
@@ -227,50 +307,71 @@ public sealed class KararMotoruWorker : IDisposable
                     continue;
                 }
 
-                BiyometrikVeri? veri;
-                try
-                {
-                    veri = JsonSerializer.Deserialize<BiyometrikVeri>(jsonVeri, _jsonOptions);
-                }
-                catch (JsonException ex)
-                {
-                    Publish(_sonState with { Hata = "Gecersiz biyometrik veri: " + ex.Message });
-                    continue;
-                }
-
-                if (veri is null || _girdiIzleyici is null)
-                {
-                    continue;
-                }
-
-                GirdiAktiviteOzeti girdiOzeti = _girdiIzleyici.OzetAl(Ayarlar.AktivitePenceresiSaniye);
-                SurecTaramaSonucu surecSonucu = _surecTarayici.Tara(Ayarlar);
-                OdakSonucu odakSonucu = _odakMotoru.Hesapla(veri, girdiOzeti, surecSonucu, Ayarlar);
-
-                string? mudahaleHatasi = MudahaleUygula(odakSonucu, surecSonucu);
-                _durumYazici.Yaz(odakSonucu, veri, girdiOzeti, surecSonucu);
-
-                KararMotoruState state = new()
-                {
-                    Zaman = DateTimeOffset.Now,
-                    PipeBagli = true,
-                    MudahaleAktif = MudahaleAktif,
-                    DurumMesaji = kolayDurumMesaji(odakSonucu),
-                    Biyometrik = veri,
-                    Girdi = girdiOzeti,
-                    Surec = surecSonucu,
-                    Odak = odakSonucu,
-                    Hata = mudahaleHatasi
-                };
-
-                VeritabaniKaydiYaz(state);
-                Publish(state);
+                PaketIsle(jsonVeri, DateTimeOffset.Now);
             }
         }
         finally
         {
             ClearActivePipe(client);
         }
+    }
+
+    private void PaketIsle(string jsonVeri, DateTimeOffset paketZamani)
+    {
+        BiyometrikVeri? veri;
+        try
+        {
+            veri = JsonSerializer.Deserialize<BiyometrikVeri>(jsonVeri, _jsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            Publish(_sonState with { Hata = "Geçersiz biyometrik veri: " + ex.Message });
+            return;
+        }
+
+        if (veri is null || _girdiIzleyici is null)
+        {
+            return;
+        }
+
+        if (Duraklatildi)
+        {
+            Publish(new KararMotoruState
+            {
+                Zaman = paketZamani,
+                PipeBagli = true,
+                Duraklatildi = true,
+                MudahaleAktif = false,
+                DurumMesaji = "Duraklatma modu aktif",
+                Biyometrik = veri
+            });
+            return;
+        }
+
+        GirdiAktiviteOzeti girdiOzeti = _girdiIzleyici.OzetAl(Ayarlar.AktivitePenceresiSaniye);
+        SurecTaramaSonucu surecSonucu = _surecTarayici.Tara(Ayarlar);
+        OdakSonucu odakSonucu = _odakMotoru.Hesapla(veri, girdiOzeti, surecSonucu, Ayarlar);
+
+        string? mudahaleHatasi = MudahaleUygula(odakSonucu, surecSonucu);
+        MedyaDurumunuUygula(odakSonucu);
+        _durumYazici.Yaz(odakSonucu, veri, girdiOzeti, surecSonucu);
+
+        KararMotoruState state = new()
+        {
+            Zaman = paketZamani,
+            PipeBagli = true,
+            Duraklatildi = false,
+            MudahaleAktif = MudahaleAktif,
+            DurumMesaji = KolayDurumMesaji(odakSonucu),
+            Biyometrik = veri,
+            Girdi = girdiOzeti,
+            Surec = surecSonucu,
+            Odak = odakSonucu,
+            Hata = mudahaleHatasi
+        };
+
+        VeritabaniKaydiYaz(state);
+        Publish(state);
     }
 
     private void SetActivePipe(NamedPipeClientStream client)
@@ -332,8 +433,21 @@ public sealed class KararMotoruWorker : IDisposable
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
         {
-            return "Mudahale hatasi: " + ex.Message;
+            return "Müdahale hatası: " + ex.Message;
         }
+    }
+
+    private void MedyaDurumunuUygula(OdakSonucu odakSonucu)
+    {
+        bool odakDusuk = odakSonucu.Puan < Ayarlar.OdakEsigi;
+        _medyaYonetici.OdakDurumunuUygula(odakDusuk);
+    }
+
+    private IReadOnlyList<string> AktifKaraListeHedefleri()
+    {
+        return _sonState.Surec?.KaraListedekiSurecler.Count > 0
+            ? _sonState.Surec.KaraListedekiSurecler
+            : Array.Empty<string>();
     }
 
     private void Publish(KararMotoruState state)
@@ -361,14 +475,14 @@ public sealed class KararMotoruWorker : IDisposable
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
         {
-            Publish(_sonState with { Hata = "Veritabani kayit hatasi: " + ex.Message });
+            Publish(_sonState with { Hata = "Veritabanı kayıt hatası: " + ex.Message });
         }
     }
 
-    private static string kolayDurumMesaji(OdakSonucu odakSonucu)
+    private static string KolayDurumMesaji(OdakSonucu odakSonucu)
     {
         return odakSonucu.MudahaleGerekli
-            ? "Odak dusuk; kara liste icin mudahale oneriliyor"
+            ? "Odak düşük; kara liste için müdahale öneriliyor"
             : "Odak izleniyor";
     }
 }

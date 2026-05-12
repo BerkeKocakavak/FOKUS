@@ -1,79 +1,126 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace FokusKararMotoru.Services
+namespace FokusKararMotoru.Services;
+
+public sealed class SurecYonetici
 {
-    public class SurecYonetici
+    private static readonly HashSet<string> KritikSurecler = new(StringComparer.OrdinalIgnoreCase)
     {
-        // 1. Windows API Fonksiyonlar� (P/Invoke)
-        [Flags]
-        public enum ThreadAccess : int
+        "explorer", "csrss", "wininit", "smss", "services", "lsass", "svchost", "devenv", "KararMotoru"
+    };
+
+    [Flags]
+    public enum ThreadAccess : int
+    {
+        SuspendResume = 0x0002
+    }
+
+    public void SurecleriDondur(IEnumerable<string> karaListedekiSurecler)
+    {
+        foreach (string surecAdi in karaListedekiSurecler)
         {
-            SUSPEND_RESUME = 0x0002 // Access Denied yememek i�in sadece bu yetkiyi istiyoruz
-        }
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern IntPtr OpenThread(ThreadAccess dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern uint SuspendThread(IntPtr hThread);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern int ResumeThread(IntPtr hThread);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern bool CloseHandle(IntPtr handle);
-
-        // 2. Sistemin ��kmesini Engelleyen Hardcoded Beyaz Liste
-        private static readonly HashSet<string> KritikSurecler = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "explorer", "csrss", "wininit", "smss", "services", "lsass", "svchost", "devenv", "KararMotoru"
-        };
-
-        // 3. S�re�leri Dondurma Metodu
-        public void SurecleriDondur(IEnumerable<string> karaListedekiSurecler)
-        {
-            foreach (string surecAdi in karaListedekiSurecler)
+            if (KritikSurecler.Contains(surecAdi))
             {
-                if (KritikSurecler.Contains(surecAdi)) continue; // G�venlik kalkan�
-
-                Process[] processes = Process.GetProcessesByName(surecAdi);
-                foreach (Process process in processes)
-                {
-                    foreach (ProcessThread thread in process.Threads)
-                    {
-                        IntPtr ptrOpenThread = OpenThread(ThreadAccess.SUSPEND_RESUME, false, (uint)thread.Id);
-                        if (ptrOpenThread != IntPtr.Zero)
-                        {
-                            SuspendThread(ptrOpenThread);
-                            CloseHandle(ptrOpenThread);
-                        }
-                    }
-                }
+                continue;
             }
-        }
 
-        // 4. S�re�leri Serbest B�rakma (Devam Ettirme) Metodu
-        public void SurecleriDevamEttir(IEnumerable<string> karaListedekiSurecler)
-        {
-            foreach (string surecAdi in karaListedekiSurecler)
+            Process[] processes = Process.GetProcessesByName(surecAdi);
+            foreach (Process process in processes)
             {
-                Process[] processes = Process.GetProcessesByName(surecAdi);
-                foreach (Process process in processes)
+                Kucult(process);
+                foreach (ProcessThread thread in process.Threads)
                 {
-                    foreach (ProcessThread thread in process.Threads)
+                    IntPtr ptrOpenThread = OpenThread(ThreadAccess.SuspendResume, false, (uint)thread.Id);
+                    if (ptrOpenThread != IntPtr.Zero)
                     {
-                        IntPtr ptrOpenThread = OpenThread(ThreadAccess.SUSPEND_RESUME, false, (uint)thread.Id);
-                        if (ptrOpenThread != IntPtr.Zero)
-                        {
-                            ResumeThread(ptrOpenThread);
-                            CloseHandle(ptrOpenThread);
-                        }
+                        SuspendThread(ptrOpenThread);
+                        CloseHandle(ptrOpenThread);
                     }
                 }
             }
         }
     }
+
+    public void SurecleriDevamEttir(IEnumerable<string> karaListedekiSurecler)
+    {
+        foreach (string surecAdi in karaListedekiSurecler)
+        {
+            Process[] processes = Process.GetProcessesByName(surecAdi);
+            foreach (Process process in processes)
+            {
+                foreach (ProcessThread thread in process.Threads)
+                {
+                    IntPtr ptrOpenThread = OpenThread(ThreadAccess.SuspendResume, false, (uint)thread.Id);
+                    if (ptrOpenThread != IntPtr.Zero)
+                    {
+                        ResumeThread(ptrOpenThread);
+                        CloseHandle(ptrOpenThread);
+                    }
+                }
+            }
+        }
+    }
+
+    public int SurecleriSonlandir(IEnumerable<string> karaListedekiSurecler)
+    {
+        int sayi = 0;
+        foreach (string surecAdi in karaListedekiSurecler)
+        {
+            if (KritikSurecler.Contains(surecAdi))
+            {
+                continue;
+            }
+
+            Process[] processes = Process.GetProcessesByName(surecAdi);
+            foreach (Process process in processes)
+            {
+                if (process.HasExited)
+                {
+                    continue;
+                }
+
+                process.Kill(entireProcessTree: true);
+                sayi++;
+            }
+        }
+
+        return sayi;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenThread(ThreadAccess dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint SuspendThread(IntPtr hThread);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern int ResumeThread(IntPtr hThread);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    private static void Kucult(Process process)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            if (process.MainWindowHandle != IntPtr.Zero)
+            {
+                ShowWindow(process.MainWindowHandle, ShowMinimized);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private const int ShowMinimized = 6;
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }

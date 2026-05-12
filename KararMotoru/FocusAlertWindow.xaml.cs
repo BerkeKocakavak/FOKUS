@@ -7,10 +7,12 @@ public partial class FocusAlertWindow : Window
 {
     private readonly DispatcherTimer _timer;
 
-    public FocusAlertWindow(int puan, string mesaj)
+    public FocusAlertWindow(string baslik, string mesaj, string notMesaji)
     {
         InitializeComponent();
-        MessageText.Text = $"{mesaj}\nOdak puanı: {puan}/100";
+        TitleText.Text = baslik;
+        MessageText.Text = mesaj;
+        NoteText.Text = notMesaji;
 
         _timer = new DispatcherTimer
         {

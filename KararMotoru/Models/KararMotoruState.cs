@@ -6,6 +6,8 @@ public sealed record KararMotoruState
 
     public bool PipeBagli { get; init; }
 
+    public bool Duraklatildi { get; init; }
+
     public bool MudahaleAktif { get; init; }
 
     public string DurumMesaji { get; init; } = "Hazir";

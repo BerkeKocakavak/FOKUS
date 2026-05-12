@@ -38,11 +38,15 @@ public static class SelfTest
         OdakSonucu normal = motor.Hesapla(normalVeri, aktifGirdi, normalSurec, ayarlar);
         Dogrula(normal.Puan >= 95, "Normal senaryoda odak puanı yüksek olmalı.");
 
-        var daginikSurec = new SurecTaramaSonucu
+        var karaListeSureci = new SurecTaramaSonucu
         {
             KaraListedekiSurecler = ["Discord"],
             KaraListeCezasi = 30
         };
+        OdakSonucu sadeceKaraListe = new OdakPuaniMotoru().Hesapla(normalVeri, aktifGirdi, karaListeSureci, ayarlar);
+        Dogrula(sadeceKaraListe.Puan >= 95, "Kara liste tek başına odak puanını düşürmemeli.");
+        Dogrula(sadeceKaraListe.Cezalar.All(c => c.Kaynak != "Kara liste"), "Kara liste cezası üretilmemeli.");
+
         var daginikVeri = new BiyometrikVeri
         {
             YuzVar = true,
@@ -55,13 +59,32 @@ public static class SelfTest
             YanaSapma = 4
         };
 
-        OdakSonucu daginik = motor.Hesapla(daginikVeri, aktifGirdi, daginikSurec, ayarlar);
+        OdakSonucu daginik = motor.Hesapla(daginikVeri, aktifGirdi, karaListeSureci, ayarlar);
         Dogrula(daginik.Puan < normal.Puan, "Dağınık senaryoda odak puanı düşmeli.");
         Dogrula(daginik.MudahaleGerekli, "Kara liste ve düşük puan varsa müdahale önerilmeli.");
         Dogrula(daginik.Cezalar.Any(c => c.Kaynak == "Göz"), "Göz cezası üretilmeli.");
         Dogrula(daginik.Cezalar.Any(c => c.Kaynak == "Bakış"), "Bakış cezası üretilmeli.");
         Dogrula(daginik.Cezalar.Any(c => c.Kaynak == "Postür"), "Postür cezası üretilmeli.");
-        Dogrula(daginik.Cezalar.Any(c => c.Kaynak == "Kara liste"), "Kara liste cezası üretilmeli.");
+
+        var esnekBakisAyarlari = new KararMotoruAyarlari
+        {
+            EmaAlpha = 1.0,
+            GazeEsigi = 0.20,
+            GazeCezaKatsayisi = ayarlar.GazeCezaKatsayisi
+        };
+        esnekBakisAyarlari.Normalize();
+        var bakisSapmasi = new BiyometrikVeri
+        {
+            YuzVar = true,
+            AnalizHazir = true,
+            KalibrasyonTamam = true,
+            Ear = 0.28,
+            EarEsik = 0.20,
+            GazeSapma = 0.05
+        };
+        OdakSonucu sikiBakis = new OdakPuaniMotoru().Hesapla(bakisSapmasi, aktifGirdi, normalSurec, ayarlar);
+        OdakSonucu esnekBakis = new OdakPuaniMotoru().Hesapla(bakisSapmasi, aktifGirdi, normalSurec, esnekBakisAyarlari);
+        Dogrula(sikiBakis.Puan < esnekBakis.Puan, "Bakış eşiği ayarı odak puanını değiştirmeli.");
 
         var yuzYok = new BiyometrikVeri
         {
@@ -120,6 +143,17 @@ public static class SelfTest
             IReadOnlyList<SessionSummary> summaries = db.GetSessionSummaries(5, 60);
             Dogrula(summaries.Count > 0, "Veritabanı oturum raporu üretmeli.");
             Dogrula(summaries[0].SampleCount > 0, "Veritabanı odak örneği kaydetmeli.");
+
+            DateTimeOffset ikinciBaslangic = DateTimeOffset.Now.AddMinutes(-5);
+            db.StartSession("self-test-2", ikinciBaslangic);
+            db.EndSession("self-test-2", ikinciBaslangic.AddMinutes(2));
+            DateTimeOffset ucuncuBaslangic = DateTimeOffset.Now.AddMinutes(-2);
+            db.StartSession("self-test-3", ucuncuBaslangic);
+            db.EndSession("self-test-3", ucuncuBaslangic.AddMinutes(1));
+
+            DashboardSnapshot snapshot = db.GetDashboardSnapshot(1, 60);
+            Dogrula(snapshot.Overview.SessionCount >= 3, "İstatistik özeti son oturum limitiyle sınırlanmamalı.");
+            Dogrula(snapshot.Overview.TotalDuration.TotalSeconds > 0, "İstatistik özeti oturum süresini toplamalı.");
         }
         finally
         {

@@ -69,12 +69,6 @@ public sealed class OdakPuaniMotoru
             hedefPuan -= aktiviteCezasi;
         }
 
-        if (surec.KaraListeCezasi > 0)
-        {
-            CezaEkle(cezalar, "Kara liste", surec.KaraListeCezasi, "Dikkat dağıtıcı süreç açık görünüyor.");
-            hedefPuan -= surec.KaraListeCezasi;
-        }
-
         hedefPuan = Math.Clamp(hedefPuan, 0, 100);
         double puruzsuzPuan = ayarlar.EmaAlpha * hedefPuan + (1.0 - ayarlar.EmaAlpha) * _oncekiPuan;
         _oncekiPuan = puruzsuzPuan;

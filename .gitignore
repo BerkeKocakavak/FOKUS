@@ -2,6 +2,13 @@ venv/
 face_landmarker.task 
 .vs/
 __pycache__/
+*.tmp
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.user
+*.suo
 karar_motoru.log
 karar_motoru_ayarlar.json
 karar_motoru_durum.json
@@ -9,6 +16,8 @@ KararMotoru/codex_bin/
 KararMotoru/codex_obj/
 KararMotoru/bin/
 KararMotoru/obj/
+bin/
+obj/
 camera_frame.jpg
 camera_frame.jpg.*.tmp
 camera_worker.log

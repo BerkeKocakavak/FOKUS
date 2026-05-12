@@ -51,7 +51,7 @@ public sealed class PythonCameraWorker : IDisposable
         string scriptPath = Path.Combine(_projeKoku, "kamera_test.py");
         if (!File.Exists(scriptPath))
         {
-            throw new FileNotFoundException("Kamera betigi bulunamadi.", scriptPath);
+            throw new FileNotFoundException("Kamera betiği bulunamadı.", scriptPath);
         }
 
         _logWriter?.Dispose();
@@ -90,14 +90,14 @@ public sealed class PythonCameraWorker : IDisposable
         };
         _process.OutputDataReceived += (_, e) => YazLog(e.Data);
         _process.ErrorDataReceived += (_, e) => YazLog(e.Data);
-        _process.Exited += (_, _) => YazLog("Python kamera isçisi kapandi.");
+        _process.Exited += (_, _) => YazLog("Python kamera işçisi kapandı.");
 
         if (!_process.Start())
         {
-            throw new InvalidOperationException("Python kamera isçisi baslatilamadi.");
+            throw new InvalidOperationException("Python kamera işçisi başlatılamadı.");
         }
 
-        YazLog("Python kamera isçisi baslatildi.");
+        YazLog("Python kamera işçisi başlatıldı.");
         StartFrameReader();
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();
@@ -127,7 +127,7 @@ public sealed class PythonCameraWorker : IDisposable
             using var process = Process.Start(startInfo);
             if (process is null)
             {
-                return new PythonDependencyCheckResult(false, "Python baslatilamadi.");
+                return new PythonDependencyCheckResult(false, "Python başlatılamadı.");
             }
 
             using var timeoutSource = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(20));
@@ -137,18 +137,18 @@ public sealed class PythonCameraWorker : IDisposable
             string sonuc = (output + Environment.NewLine + error).Trim();
             if (string.IsNullOrWhiteSpace(sonuc))
             {
-                sonuc = "Bagimlilik kontrolu tamamlandi.";
+                sonuc = "Bağımlılık kontrolü tamamlandı.";
             }
 
             return new PythonDependencyCheckResult(process.ExitCode == 0, sonuc);
         }
         catch (OperationCanceledException)
         {
-            return new PythonDependencyCheckResult(false, "Bagimlilik kontrolu zaman asimina ugradi.");
+            return new PythonDependencyCheckResult(false, "Bağımlılık kontrolü zaman aşımına uğradı.");
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            return new PythonDependencyCheckResult(false, "Bagimlilik kontrolu calistirilamadi: " + ex.Message);
+            return new PythonDependencyCheckResult(false, "Bağımlılık kontrolü çalıştırılamadı: " + ex.Message);
         }
     }
 
@@ -244,7 +244,7 @@ public sealed class PythonCameraWorker : IDisposable
             {
                 using var client = new NamedPipeClientStream(".", FramePipeName, PipeDirection.In, PipeOptions.Asynchronous);
                 await client.ConnectAsync(1000, cancellationToken);
-                YazLog("Kamera goruntu pipe baglandi.");
+                YazLog("Kamera görüntü pipe bağlantısı kuruldu.");
 
                 while (!cancellationToken.IsCancellationRequested && client.IsConnected)
                 {
@@ -252,7 +252,7 @@ public sealed class PythonCameraWorker : IDisposable
                     int length = BitConverter.ToInt32(lengthBytes, 0);
                     if (length <= 0 || length > 2_000_000)
                     {
-                        throw new InvalidDataException("Gecersiz kamera karesi boyutu: " + length);
+                        throw new InvalidDataException("Geçersiz kamera karesi boyutu: " + length);
                     }
 
                     byte[] frameBytes = await ReadExactAsync(client, length, cancellationToken);
@@ -265,7 +265,7 @@ public sealed class PythonCameraWorker : IDisposable
             }
             catch (Exception ex) when (ex is TimeoutException or IOException or EndOfStreamException or InvalidDataException)
             {
-                YazLog("Kamera goruntu pipe yeniden denenecek: " + ex.Message);
+                YazLog("Kamera görüntü pipe bağlantısı yeniden denenecek: " + ex.Message);
                 try
                 {
                     await Task.Delay(500, cancellationToken);
