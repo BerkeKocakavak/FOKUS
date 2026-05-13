@@ -186,6 +186,7 @@ public sealed class KararMotoruWorker : IDisposable
         _workerTask = Task.Run(() => RunAsync(_cancellation.Token));
     }
 
+    // Kapanista pipe'i zorla dispose eder; aksi halde ReadLine beklemesi WPF kapanisini kilitleyebilir.
     public async Task StopAsync(TimeSpan? timeout = null)
     {
         CancellationTokenSource? cancellation = _cancellation;
@@ -300,6 +301,7 @@ public sealed class KararMotoruWorker : IDisposable
         }
     }
 
+    // Python named pipe baglantisini tek yerde kurar ve kopunca RunAsync yeniden deneme dongusune doner.
     private async Task PipeDongusuAsync(CancellationToken cancellationToken)
     {
         using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.In, PipeOptions.Asynchronous);
@@ -340,6 +342,7 @@ public sealed class KararMotoruWorker : IDisposable
         }
     }
 
+    // Kamera paketini karar motoru state'ine cevirir: girdi, surec, puan, medya ve DB yazimi burada birlesir.
     private void PaketIsle(string jsonVeri, DateTimeOffset paketZamani)
     {
         BiyometrikVeri? veri;
@@ -535,6 +538,7 @@ public sealed class KararMotoruWorker : IDisposable
         }
     }
 
+    // Otomatik kara liste mudahalesi yavas Win32 islemlerini arka plana alir, paket akisinin donmasini engeller.
     private string? MudahaleUygula(OdakSonucu odakSonucu, SurecTaramaSonucu surecSonucu)
     {
         string? bekleyenHata = OtomatikMudahaleHatasiniAl();

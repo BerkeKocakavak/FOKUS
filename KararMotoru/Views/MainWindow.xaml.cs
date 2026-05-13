@@ -317,6 +317,7 @@ public partial class MainWindow : Window
         }
     }
 
+    // Worker'dan gelen tek state paketini UI, grafik, uyarilar ve oturum sayaclarina dagitir.
     private void DurumuGoster(KararMotoruState state)
     {
         if (KameraBaglantisiSorunlu(state))
@@ -568,6 +569,7 @@ public partial class MainWindow : Window
         MouseIdleText.Text = $"{(girdi?.FarePikselDakika ?? 0):0} / {(girdi?.HareketsizSaniye ?? 0):0} sn";
     }
 
+    // Sesli/popup uyarilar burada zaman araliklariyla filtrelenir; ayni uyari arka arkaya basmaz.
     private void UyariKosullariniKontrolEt(KararMotoruState state, int puan)
     {
         if (puan < _ayarlar.OdakEsigi)
@@ -796,6 +798,7 @@ public partial class MainWindow : Window
         _ = KameraIscisiniYenidenBaslatAsync();
     }
 
+    // Kamera/pipe kopmasinda sadece Python iscisini toparlar; C# oturum state'i korunur.
     private async Task KameraIscisiniYenidenBaslatAsync()
     {
         if (_kameraYenidenBaslatiliyor)

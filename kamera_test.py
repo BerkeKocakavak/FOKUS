@@ -5,9 +5,6 @@ import os
 import time
 import json
 import threading
-import atexit
-import shutil
-import subprocess
 import win32pipe
 import win32file
 import pywintypes
@@ -32,8 +29,6 @@ FRAME_PIPE_ADI = None
 KOK_DIZIN = os.path.dirname(os.path.abspath(__file__))
 LOG_DIZIN = os.environ.get("FOKUS_LOG_DIR") or os.path.join(KOK_DIZIN, "loglar")
 MODEL_DIZIN = os.environ.get("FOKUS_MODEL_DIR") or os.path.join(KOK_DIZIN, "modeller")
-KARAR_MOTORU_PROJE = os.path.join(KOK_DIZIN, "KararMotoru", "KararMotoru.csproj")
-KARAR_MOTORU_LOG = os.path.join(LOG_DIZIN, "karar_motoru.log")
 MODEL_PATH = os.path.join(MODEL_DIZIN, "face_landmarker.task")
 MODEL_ASSET_PATH = os.path.join("modeller", "face_landmarker.task")
 HEADLESS = False
@@ -76,8 +71,6 @@ pipe_bagli = False
 frame_pipe = None
 frame_pipe_bagli = False
 frame_pipe_kilidi = threading.Lock()
-karar_motoru_proc = None
-karar_motoru_log = None
 
 os.chdir(KOK_DIZIN)
 
@@ -180,76 +173,6 @@ def analiz_modelini_yukle():
     except Exception as e:
         detector_hatasi = str(e)
         print(f"Analiz modeli yuklenemedi: {e}")
-
-def karar_motoru_zaten_calisiyor():
-    try:
-        cikti = subprocess.check_output(
-            ["tasklist", "/FI", "IMAGENAME eq KararMotoru.exe", "/NH"],
-            text=True,
-            encoding="utf-8",
-            errors="ignore"
-        )
-        return "KararMotoru.exe" in cikti
-    except Exception:
-        return False
-
-def karar_motoru_baslat():
-    global karar_motoru_proc, karar_motoru_log
-
-    if os.environ.get("FOKUS_KARAR_MOTORU_OTOMATIK", "0") != "1":
-        print("Karar motoru otomatik baslatma kapali.")
-        return None
-
-    if karar_motoru_zaten_calisiyor():
-        print("Karar motoru zaten calisiyor, mevcut surece baglanilacak.")
-        return None
-
-    dotnet = shutil.which("dotnet")
-    if dotnet is None:
-        print("dotnet bulunamadi. Karar motorunu otomatik baslatamiyorum.")
-        return None
-
-    if not os.path.exists(KARAR_MOTORU_PROJE):
-        print(f"Karar motoru projesi bulunamadi: {KARAR_MOTORU_PROJE}")
-        return None
-
-    try:
-        karar_motoru_log = open(KARAR_MOTORU_LOG, "w", encoding="utf-8")
-        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        karar_motoru_proc = subprocess.Popen(
-            [dotnet, "run", "--project", KARAR_MOTORU_PROJE],
-            cwd=KOK_DIZIN,
-            stdout=karar_motoru_log,
-            stderr=subprocess.STDOUT,
-            creationflags=creationflags
-        )
-        print("Karar motoru otomatik baslatildi.")
-        print(f"Karar motoru log dosyasi: {KARAR_MOTORU_LOG}")
-        return karar_motoru_proc
-    except Exception as e:
-        print(f"Karar motoru baslatilamadi: {e}")
-        if karar_motoru_log:
-            karar_motoru_log.close()
-            karar_motoru_log = None
-        return None
-
-def karar_motoru_durdur():
-    global karar_motoru_proc, karar_motoru_log
-
-    if karar_motoru_proc is not None and karar_motoru_proc.poll() is None:
-        karar_motoru_proc.terminate()
-        try:
-            karar_motoru_proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            karar_motoru_proc.kill()
-
-    karar_motoru_proc = None
-
-    if karar_motoru_log is not None:
-        karar_motoru_log.close()
-        karar_motoru_log = None
-
-atexit.register(karar_motoru_durdur)
 
 def pipe_sunucusu():
     global pipe_bagli
@@ -436,6 +359,7 @@ def landmark_cizgisi_ciz(frame, landmarks, noktalar, w, h, renk, kapali=False, k
     cv2.polylines(frame, [pts], kapali, renk, kalinlik, cv2.LINE_AA)
 
 
+# Kalibrasyon sirasinda UI'ya gonderilen kareye yuz/goz referans noktalarini cizer.
 def kalibrasyon_cizimleri_ciz(frame, landmarks, w, h, uygun):
     nokta_renk = (80, 180, 255) if uygun else (0, 180, 255)
     ana_renk = (0, 220, 120) if uygun else (0, 200, 255)
@@ -464,6 +388,7 @@ def kalibrasyon_cizimleri_ciz(frame, landmarks, w, h, uygun):
     cv2.circle(frame, landmark_noktasi(landmarks[BURUN], w, h), 4, (0, 0, 255), -1, cv2.LINE_AA)
 
 
+# Yanlis referans almamak icin yuz konumu, goz acikligi ve bas durusunu birlikte kontrol eder.
 def kalibrasyon_kalitesi(landmarks, w, h, ear, one_egim, yana_egim):
     xs = np.array([landmark.x * w for landmark in landmarks])
     ys = np.array([landmark.y * h for landmark in landmarks])
@@ -493,14 +418,6 @@ def kalibrasyon_kalitesi(landmarks, w, h, ear, one_egim, yana_egim):
 def kalibrasyon_medyani(degerler, varsayilan=0.0):
     return float(np.median(degerler)) if degerler else varsayilan
 
-
-# Önce kütüphaneyi kur
-try:
-    import win32pipe
-except ImportError:
-    print("pywin32 kuruluyor...")
-    os.system("pip install pywin32")
-    import win32pipe
 
 args = argumanlari_oku()
 HEADLESS = args.headless
@@ -533,8 +450,7 @@ if cap is None:
 model_thread = threading.Thread(target=analiz_modelini_yukle, daemon=True)
 model_thread.start()
 
-karar_motoru_baslat()
-
+# Ana kamera dongusu: kare okuma, analiz frekansi sinirlama, IPC verisi ve onizleme karesi burada uretir.
 while True:
     if cap is None:
         kamera_durumunu_yayimla("Kamera baglantisi yok")
@@ -749,4 +665,3 @@ if cap is not None:
     cap.release()
 if not HEADLESS:
     cv2.destroyAllWindows()
-karar_motoru_durdur()

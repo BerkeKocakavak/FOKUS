@@ -7,11 +7,4 @@ public sealed class SurecTaramaSonucu
     public string? OnPlanSurec { get; init; }
 
     public bool OnPlanBeyazListede { get; init; }
-
-    public int KaraListeCezasi { get; init; }
-
-    public string KaraListeOzeti =>
-        KaraListedekiSurecler.Count == 0
-            ? "Yok"
-            : $"{KaraListedekiSurecler.Count} süreç ({string.Join(", ", KaraListedekiSurecler)}) [CEZA: -{KaraListeCezasi}]";
 }

@@ -7,6 +7,7 @@ namespace FokusKararMotoru;
 public partial class SettingsWindow : Window
 {
     private KararMotoruAyarlari _ayarlar;
+    private bool _gelismisAyarlarAcik;
 
     public SettingsWindow(KararMotoruAyarlari ayarlar)
     {
@@ -126,6 +127,15 @@ public partial class SettingsWindow : Window
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void AdvancedToggleButton_Click(object sender, RoutedEventArgs e)
+    {
+        _gelismisAyarlarAcik = !_gelismisAyarlarAcik;
+        AdvancedSettingsPanel.Visibility = _gelismisAyarlarAcik ? Visibility.Visible : Visibility.Collapsed;
+        AdvancedToggleButton.Content = _gelismisAyarlarAcik
+            ? "Gelişmiş ayarları gizle"
+            : "Gelişmiş ayarları göster";
     }
 
     private static bool DoubleOku(string text, out double value)

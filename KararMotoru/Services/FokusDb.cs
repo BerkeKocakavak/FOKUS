@@ -22,6 +22,7 @@ public sealed class FokusDb
 
     public string DbPath { get; }
 
+    // SQLite semasi uygulama acilisinda burada hazirlanir; eski veritabanlari mevcut tablolari korur.
     public void EnsureCreated()
     {
         lock (_syncRoot)
@@ -64,7 +65,6 @@ public sealed class FokusDb
                     foreground_process TEXT NULL,
                     foreground_whitelisted INTEGER NOT NULL,
                     blacklist_processes TEXT NOT NULL,
-                    blacklist_penalty INTEGER NOT NULL,
                     keys_per_min REAL NOT NULL,
                     mouse_pixels_per_min REAL NOT NULL,
                     idle_seconds REAL NOT NULL,
@@ -135,6 +135,7 @@ public sealed class FokusDb
         }
     }
 
+    // Odak ornegi, cezalar ve kara liste yakalamalari tek transaction icinde tutarli yazilir.
     public void SaveSample(string sessionId, KararMotoruState state)
     {
         if (state.Odak is null)
@@ -159,7 +160,7 @@ public sealed class FokusDb
                         blink_count, calibration_done, calibration_remaining, analysis_ready,
                         analysis_status, pipe_connected, intervention_enabled,
                         foreground_process, foreground_whitelisted, blacklist_processes,
-                        blacklist_penalty, keys_per_min, mouse_pixels_per_min, idle_seconds
+                        keys_per_min, mouse_pixels_per_min, idle_seconds
                     )
                     VALUES (
                         $session_id, $time, $focus_score, $raw_score, $intervention_required,
@@ -168,7 +169,7 @@ public sealed class FokusDb
                         $blink_count, $calibration_done, $calibration_remaining, $analysis_ready,
                         $analysis_status, $pipe_connected, $intervention_enabled,
                         $foreground_process, $foreground_whitelisted, $blacklist_processes,
-                        $blacklist_penalty, $keys_per_min, $mouse_pixels_per_min, $idle_seconds
+                        $keys_per_min, $mouse_pixels_per_min, $idle_seconds
                     );
                     """;
 
@@ -200,7 +201,6 @@ public sealed class FokusDb
                 command.Parameters.AddWithValue("$foreground_process", NullIfEmpty(surec?.OnPlanSurec));
                 command.Parameters.AddWithValue("$foreground_whitelisted", Bool(surec?.OnPlanBeyazListede == true));
                 command.Parameters.AddWithValue("$blacklist_processes", surec is null ? string.Empty : string.Join("|", surec.KaraListedekiSurecler));
-                command.Parameters.AddWithValue("$blacklist_penalty", surec?.KaraListeCezasi ?? 0);
                 command.Parameters.AddWithValue("$keys_per_min", girdi?.TusDakika ?? 0);
                 command.Parameters.AddWithValue("$mouse_pixels_per_min", girdi?.FarePikselDakika ?? 0);
                 command.Parameters.AddWithValue("$idle_seconds", girdi?.HareketsizSaniye ?? 0);
@@ -305,6 +305,7 @@ public sealed class FokusDb
         }
     }
 
+    // Istatistik penceresinin ihtiyaci olan grafik ve ozet verilerini ayni DB snapshot'indan uretir.
     public DashboardSnapshot GetDashboardSnapshot(int sessionLimit, int focusThreshold)
     {
         lock (_syncRoot)

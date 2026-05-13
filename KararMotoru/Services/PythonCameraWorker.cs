@@ -76,7 +76,6 @@ public sealed class PythonCameraWorker : IDisposable
         startInfo.ArgumentList.Add(Math.Clamp(PreviewFps, 5, 60).ToString(System.Globalization.CultureInfo.InvariantCulture));
         startInfo.ArgumentList.Add("--analysis-fps");
         startInfo.ArgumentList.Add(Math.Clamp(AnalysisFps, 1, 30).ToString(System.Globalization.CultureInfo.InvariantCulture));
-        startInfo.Environment["FOKUS_KARAR_MOTORU_OTOMATIK"] = "0";
         startInfo.Environment["FOKUS_LOG_DIR"] = UygulamaKlasorleri.Loglar(_projeKoku);
         startInfo.Environment["FOKUS_MODEL_DIR"] = UygulamaKlasorleri.Modeller(_projeKoku);
         startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
@@ -189,11 +188,6 @@ public sealed class PythonCameraWorker : IDisposable
         }
     }
 
-    public void Stop()
-    {
-        StopAsync().GetAwaiter().GetResult();
-    }
-
     public void Dispose()
     {
         if (_disposed)
@@ -201,7 +195,7 @@ public sealed class PythonCameraWorker : IDisposable
             return;
         }
 
-        Stop();
+        StopAsync().GetAwaiter().GetResult();
         _disposed = true;
     }
 

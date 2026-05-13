@@ -44,8 +44,7 @@ public sealed class SurecTarayici
         {
             KaraListedekiSurecler = bulunanKaraListe.ToArray(),
             OnPlanSurec = onPlanSurec,
-            OnPlanBeyazListede = onPlanBeyazListede,
-            KaraListeCezasi = 0
+            OnPlanBeyazListede = onPlanBeyazListede
         };
     }
 
