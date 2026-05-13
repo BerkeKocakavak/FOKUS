@@ -14,6 +14,8 @@ public partial class DashboardWindow : Window
     private readonly Func<int> _focusThresholdProvider;
     private readonly DispatcherTimer _refreshTimer;
     private DashboardSnapshot? _snapshot;
+    private bool _refreshInProgress;
+    private bool _closed;
 
     public DashboardWindow(FokusDb database, Func<int> focusThresholdProvider)
     {
@@ -23,35 +25,56 @@ public partial class DashboardWindow : Window
         _focusThresholdProvider = focusThresholdProvider;
         _refreshTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromSeconds(5)
+            Interval = TimeSpan.FromSeconds(1)
         };
-        _refreshTimer.Tick += (_, _) => RefreshDashboard();
+        _refreshTimer.Tick += (_, _) => _ = RefreshDashboardAsync();
         Loaded += (_, _) =>
         {
-            RefreshDashboard();
+            _ = RefreshDashboardAsync();
             _refreshTimer.Start();
         };
-        Closed += (_, _) => _refreshTimer.Stop();
+        Closed += (_, _) =>
+        {
+            _closed = true;
+            _refreshTimer.Stop();
+        };
         TrendCanvas.SizeChanged += (_, _) => DrawTrend();
         DailyCanvas.SizeChanged += (_, _) => DrawDailyBars();
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
-        RefreshDashboard();
+        _ = RefreshDashboardAsync(force: true);
     }
 
-    private void RefreshDashboard()
+    private async Task RefreshDashboardAsync(bool force = false)
     {
+        if (_refreshInProgress && !force)
+        {
+            return;
+        }
+
+        _refreshInProgress = true;
         try
         {
-            _snapshot = _database.GetDashboardSnapshot(20, _focusThresholdProvider());
+            int threshold = _focusThresholdProvider();
+            DashboardSnapshot snapshot = await Task.Run(() => _database.GetDashboardSnapshot(20, threshold));
+            if (_closed)
+            {
+                return;
+            }
+
+            _snapshot = snapshot;
             ApplySnapshot(_snapshot);
             DashboardStatusText.Text = $"Son güncelleme: {DateTime.Now:HH:mm:ss}";
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.IO.IOException or Microsoft.Data.Sqlite.SqliteException)
         {
             DashboardStatusText.Text = "İstatistikler okunamadı: " + ex.Message;
+        }
+        finally
+        {
+            _refreshInProgress = false;
         }
     }
 

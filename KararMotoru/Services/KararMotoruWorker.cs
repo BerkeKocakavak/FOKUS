@@ -27,6 +27,7 @@ public sealed class KararMotoruWorker : IDisposable
     private KararMotoruState _sonState = new();
     private string? _sessionId;
     private DateTimeOffset _lastDbWrite = DateTimeOffset.MinValue;
+    private DateTimeOffset? _bosBakisBaslangic;
     private string? _sonOtomatikMudahaleHatasi;
     private bool _karaListeAskida;
     private bool _kameraNedeniyleDuraklatildi;
@@ -86,6 +87,7 @@ public sealed class KararMotoruWorker : IDisposable
     public void DuraklatmaDurumuAyarla(bool aktif)
     {
         Duraklatildi = aktif;
+        _bosBakisBaslangic = null;
         if (!aktif)
         {
             _kameraNedeniyleDuraklatildi = false;
@@ -125,10 +127,11 @@ public sealed class KararMotoruWorker : IDisposable
             return "Askıya alınacak kara liste süreci yok.";
         }
 
-        _surecYonetici.SurecleriDondur(hedefler);
-        _karaListeAskida = true;
-        string mesaj = $"{hedefler.Count} kara liste süreci askıya alındı.";
-        Publish(_sonState with { DurumMesaji = mesaj, Hata = null });
+        SurecMudahaleSonucu sonuc = _surecYonetici.SurecleriDondur(hedefler);
+        _karaListeAskida = sonuc.EtkilenenSurecSayisi > 0;
+        string? uyari = KritikSurecUyarisi(sonuc, "askıya alma");
+        string mesaj = uyari ?? $"{sonuc.EtkilenenSurecSayisi} kara liste süreci askıya alındı.";
+        Publish(_sonState with { DurumMesaji = mesaj, Hata = uyari });
         return mesaj;
     }
 
@@ -155,12 +158,13 @@ public sealed class KararMotoruWorker : IDisposable
             return "Sonlandırılacak kara liste süreci yok.";
         }
 
-        int sayi = _surecYonetici.SurecleriSonlandir(hedefler);
+        SurecMudahaleSonucu sonuc = _surecYonetici.SurecleriSonlandir(hedefler);
         _karaListeAskida = false;
-        string mesaj = sayi == 0
+        string? uyari = KritikSurecUyarisi(sonuc, "sonlandırma");
+        string mesaj = uyari ?? (sonuc.EtkilenenSurecSayisi == 0
             ? "Sonlandırılacak çalışan süreç bulunamadı."
-            : $"{sayi} kara liste süreci sonlandırıldı.";
-        Publish(_sonState with { DurumMesaji = mesaj, Hata = null });
+            : $"{sonuc.EtkilenenSurecSayisi} kara liste süreci sonlandırıldı.");
+        Publish(_sonState with { DurumMesaji = mesaj, Hata = uyari });
         return mesaj;
     }
 
@@ -174,6 +178,7 @@ public sealed class KararMotoruWorker : IDisposable
         _cancellation = new CancellationTokenSource();
         _girdiIzleyici = new GirdiIzleyici(Ayarlar.GirdiOrneklemeMs);
         _kameraNedeniyleDuraklatildi = false;
+        _bosBakisBaslangic = null;
         _sessionId = DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
         _lastDbWrite = DateTimeOffset.MinValue;
         _database?.EnsureCreated();
@@ -389,6 +394,7 @@ public sealed class KararMotoruWorker : IDisposable
         }
 
         GirdiAktiviteOzeti girdiOzeti = _girdiIzleyici.OzetAl(Ayarlar.AktivitePenceresiSaniye);
+        BosBakisDurumunuGuncelle(veri, girdiOzeti, paketZamani);
         SurecTaramaSonucu surecSonucu = _surecTarayici.Tara(Ayarlar);
         OdakSonucu odakSonucu = _odakMotoru.Hesapla(veri, girdiOzeti, surecSonucu, Ayarlar);
 
@@ -433,10 +439,36 @@ public sealed class KararMotoruWorker : IDisposable
         return false;
     }
 
+    private void BosBakisDurumunuGuncelle(BiyometrikVeri veri, GirdiAktiviteOzeti girdi, DateTimeOffset paketZamani)
+    {
+        bool gozAcik = veri.EarEsik <= 0 ||
+            veri.Ear <= 0 ||
+            veri.Ear >= veri.EarEsik;
+        bool bakisMerkezde = veri.YuzVar &&
+            veri.AnalizHazir &&
+            veri.KalibrasyonTamam &&
+            Math.Abs(veri.GazeSapma) <= Math.Max(Ayarlar.GazeEsigi, 0.015);
+        bool basDuzgun = Math.Sqrt(Math.Pow(veri.OneSapma, 2) + Math.Pow(veri.YanaSapma, 2)) <= Math.Max(Ayarlar.PosturEsigi, 8);
+        bool girdiYok = girdi.HareketsizSaniye >= 1;
+
+        if (bakisMerkezde && basDuzgun && gozAcik && girdiYok)
+        {
+            _bosBakisBaslangic ??= paketZamani;
+            veri.BosBakisSaniye = Math.Max(0, (paketZamani - _bosBakisBaslangic.Value).TotalSeconds);
+            veri.BosBakis = veri.BosBakisSaniye >= Ayarlar.BosBakisSaniyesi;
+            return;
+        }
+
+        _bosBakisBaslangic = null;
+        veri.BosBakis = false;
+        veri.BosBakisSaniye = 0;
+    }
+
     private void KameraSorunuylaDuraklat(string durumMesaji, string? hata, bool pipeBagli, BiyometrikVeri? veri = null)
     {
         Duraklatildi = true;
         _kameraNedeniyleDuraklatildi = true;
+        _bosBakisBaslangic = null;
         _girdiIzleyici?.DuraklatmaDurumuAyarla(true);
 
         string? hataMesaji = hata;
@@ -518,14 +550,14 @@ public sealed class KararMotoruWorker : IDisposable
                 if (!_karaListeAskida && surecSonucu.KaraListedekiSurecler.Count > 0)
                 {
                     string[] hedefler = surecSonucu.KaraListedekiSurecler.ToArray();
-                    OtomatikMudahalePlanla(() => _surecYonetici.SurecleriDondur(hedefler));
+                    OtomatikMudahalePlanla(() => _surecYonetici.SurecleriDondur(hedefler), "askıya alma");
                     _karaListeAskida = true;
                 }
             }
             else if (_karaListeAskida)
             {
                 string[] hedefler = Ayarlar.KaraListe.ToArray();
-                OtomatikMudahalePlanla(() => _surecYonetici.SurecleriDevamEttir(hedefler));
+                OtomatikMudahalePlanla(() => _surecYonetici.SurecleriDevamEttir(hedefler), "devam ettirme");
                 _karaListeAskida = false;
             }
 
@@ -537,14 +569,33 @@ public sealed class KararMotoruWorker : IDisposable
         }
     }
 
-    private void OtomatikMudahalePlanla(Action islem)
+    private static string? KritikSurecUyarisi(SurecMudahaleSonucu sonuc, string eylem)
+    {
+        if (!sonuc.KritikSurecReddedildi)
+        {
+            return null;
+        }
+
+        string surecler = string.Join(", ", sonuc.ReddedilenKritikSurecler);
+        return $"Kritik süreç korundu: {surecler}. {eylem} işlemi engellendi.";
+    }
+
+    private void OtomatikMudahalePlanla(Func<SurecMudahaleSonucu> islem, string eylem)
     {
         _ = Task.Run(async () =>
         {
             await _mudahaleSiralama.WaitAsync();
             try
             {
-                islem();
+                SurecMudahaleSonucu sonuc = islem();
+                string? uyari = KritikSurecUyarisi(sonuc, eylem);
+                if (uyari is not null)
+                {
+                    lock (_hataSyncRoot)
+                    {
+                        _sonOtomatikMudahaleHatasi = uyari;
+                    }
+                }
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
             {

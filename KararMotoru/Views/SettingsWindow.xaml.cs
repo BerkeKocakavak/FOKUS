@@ -21,18 +21,29 @@ public partial class SettingsWindow : Window
     {
         _ayarlar = Kopyala(ayarlar);
         ThresholdTextBox.Text = _ayarlar.OdakEsigi.ToString(CultureInfo.CurrentCulture);
+        EmaAlphaTextBox.Text = _ayarlar.EmaAlpha.ToString("0.##", CultureInfo.CurrentCulture);
+        FaceMissingDropTextBox.Text = _ayarlar.YuzYokkenDusmeHizi.ToString("0.##", CultureInfo.CurrentCulture);
         PreviewFpsTextBox.Text = _ayarlar.KameraOnizlemeFps.ToString(CultureInfo.CurrentCulture);
         AnalysisFpsTextBox.Text = _ayarlar.KameraAnalizFps.ToString(CultureInfo.CurrentCulture);
+        InputSampleMsTextBox.Text = _ayarlar.GirdiOrneklemeMs.ToString(CultureInfo.CurrentCulture);
+        ActivityWindowTextBox.Text = _ayarlar.AktivitePenceresiSaniye.ToString(CultureInfo.CurrentCulture);
+        IdleWarningTextBox.Text = _ayarlar.HareketsizlikUyariSaniyesi.ToString(CultureInfo.CurrentCulture);
+        BlankGazeSecondsTextBox.Text = _ayarlar.BosBakisSaniyesi.ToString(CultureInfo.CurrentCulture);
+        BlankGazePenaltyTextBox.Text = _ayarlar.BosBakisCezaPuani.ToString("0.##", CultureInfo.CurrentCulture);
+        PipeTimeoutTextBox.Text = _ayarlar.PipeBaglantiZamanAsimiMs.ToString(CultureInfo.CurrentCulture);
         KeyboardExpectedTextBox.Text = _ayarlar.KlavyeDakikaBeklenen.ToString("0.##", CultureInfo.CurrentCulture);
         MouseExpectedTextBox.Text = _ayarlar.FarePikselDakikaBeklenen.ToString("0.##", CultureInfo.CurrentCulture);
+        LowActivityPenaltyCapTextBox.Text = _ayarlar.DusukAktiviteCezaTavani.ToString("0.##", CultureInfo.CurrentCulture);
         AlertNoteTextBox.Text = _ayarlar.UyariMesajiNotu;
         InterventionEnabledCheckBox.IsChecked = _ayarlar.KaraListeMudahalesiAktif;
         EarPenaltyFactorTextBox.Text = _ayarlar.EarCezaKatsayisi.ToString("0.##", CultureInfo.CurrentCulture);
         EarPenaltyCapTextBox.Text = _ayarlar.EarCezaTavani.ToString("0.##", CultureInfo.CurrentCulture);
         GazeThresholdTextBox.Text = _ayarlar.GazeEsigi.ToString("0.###", CultureInfo.CurrentCulture);
         GazePenaltyFactorTextBox.Text = _ayarlar.GazeCezaKatsayisi.ToString("0.##", CultureInfo.CurrentCulture);
+        GazePenaltyCapTextBox.Text = _ayarlar.GazeCezaTavani.ToString("0.##", CultureInfo.CurrentCulture);
         PostureThresholdTextBox.Text = _ayarlar.PosturEsigi.ToString("0.##", CultureInfo.CurrentCulture);
         PosturePenaltyFactorTextBox.Text = _ayarlar.PosturCezaKatsayisi.ToString("0.##", CultureInfo.CurrentCulture);
+        PosturePenaltyCapTextBox.Text = _ayarlar.PosturCezaTavani.ToString("0.##", CultureInfo.CurrentCulture);
         BlacklistSettingsTextBox.Text = string.Join(Environment.NewLine, _ayarlar.KaraListe);
         WhitelistSettingsTextBox.Text = string.Join(Environment.NewLine, _ayarlar.BeyazListe);
     }
@@ -46,20 +57,31 @@ public partial class SettingsWindow : Window
         }
 
         if (!int.TryParse(PreviewFpsTextBox.Text, out int previewFps) ||
-            !int.TryParse(AnalysisFpsTextBox.Text, out int analysisFps))
+            !int.TryParse(AnalysisFpsTextBox.Text, out int analysisFps) ||
+            !int.TryParse(InputSampleMsTextBox.Text, out int girdiOrneklemeMs) ||
+            !int.TryParse(ActivityWindowTextBox.Text, out int aktivitePenceresi) ||
+            !int.TryParse(IdleWarningTextBox.Text, out int hareketsizlikUyari) ||
+            !int.TryParse(BlankGazeSecondsTextBox.Text, out int bosBakisSaniyesi) ||
+            !int.TryParse(PipeTimeoutTextBox.Text, out int pipeTimeout))
         {
-            StatusText.Text = "FPS değerleri sayı olmalı.";
+            StatusText.Text = "Süre ve FPS değerleri sayı olmalı.";
             return;
         }
 
-        if (!DoubleOku(KeyboardExpectedTextBox.Text, out double klavyeBeklenen) ||
+        if (!DoubleOku(EmaAlphaTextBox.Text, out double emaAlpha) ||
+            !DoubleOku(FaceMissingDropTextBox.Text, out double yuzYokkenDusmeHizi) ||
+            !DoubleOku(KeyboardExpectedTextBox.Text, out double klavyeBeklenen) ||
             !DoubleOku(MouseExpectedTextBox.Text, out double fareBeklenen) ||
+            !DoubleOku(BlankGazePenaltyTextBox.Text, out double bosBakisCezaPuani) ||
+            !DoubleOku(LowActivityPenaltyCapTextBox.Text, out double dusukAktiviteCezaTavani) ||
             !DoubleOku(EarPenaltyFactorTextBox.Text, out double earCezaKatsayisi) ||
             !DoubleOku(EarPenaltyCapTextBox.Text, out double earCezaTavani) ||
             !DoubleOku(GazeThresholdTextBox.Text, out double gazeEsigi) ||
             !DoubleOku(GazePenaltyFactorTextBox.Text, out double gazeCezaKatsayisi) ||
+            !DoubleOku(GazePenaltyCapTextBox.Text, out double gazeCezaTavani) ||
             !DoubleOku(PostureThresholdTextBox.Text, out double posturEsigi) ||
-            !DoubleOku(PosturePenaltyFactorTextBox.Text, out double posturCezaKatsayisi))
+            !DoubleOku(PosturePenaltyFactorTextBox.Text, out double posturCezaKatsayisi) ||
+            !DoubleOku(PosturePenaltyCapTextBox.Text, out double posturCezaTavani))
         {
             StatusText.Text = "Hassasiyet alanları sayı olmalı.";
             return;
@@ -67,18 +89,29 @@ public partial class SettingsWindow : Window
 
         KararMotoruAyarlari yeni = Kopyala(_ayarlar);
         yeni.OdakEsigi = odakEsigi;
+        yeni.EmaAlpha = emaAlpha;
+        yeni.YuzYokkenDusmeHizi = yuzYokkenDusmeHizi;
+        yeni.PipeBaglantiZamanAsimiMs = pipeTimeout;
+        yeni.GirdiOrneklemeMs = girdiOrneklemeMs;
+        yeni.AktivitePenceresiSaniye = aktivitePenceresi;
+        yeni.HareketsizlikUyariSaniyesi = hareketsizlikUyari;
+        yeni.BosBakisSaniyesi = bosBakisSaniyesi;
+        yeni.BosBakisCezaPuani = bosBakisCezaPuani;
         yeni.KameraOnizlemeFps = previewFps;
         yeni.KameraAnalizFps = analysisFps;
         yeni.KlavyeDakikaBeklenen = klavyeBeklenen;
         yeni.FarePikselDakikaBeklenen = fareBeklenen;
+        yeni.DusukAktiviteCezaTavani = dusukAktiviteCezaTavani;
         yeni.UyariMesajiNotu = AlertNoteTextBox.Text;
         yeni.KaraListeMudahalesiAktif = InterventionEnabledCheckBox.IsChecked == true;
         yeni.EarCezaKatsayisi = earCezaKatsayisi;
         yeni.EarCezaTavani = earCezaTavani;
         yeni.GazeEsigi = gazeEsigi;
         yeni.GazeCezaKatsayisi = gazeCezaKatsayisi;
+        yeni.GazeCezaTavani = gazeCezaTavani;
         yeni.PosturEsigi = posturEsigi;
         yeni.PosturCezaKatsayisi = posturCezaKatsayisi;
+        yeni.PosturCezaTavani = posturCezaTavani;
         yeni.KaraListe = ListeOku(BlacklistSettingsTextBox.Text);
         yeni.BeyazListe = ListeOku(WhitelistSettingsTextBox.Text);
         yeni.Normalize();
@@ -120,6 +153,8 @@ public partial class SettingsWindow : Window
             GirdiOrneklemeMs = kaynak.GirdiOrneklemeMs,
             AktivitePenceresiSaniye = kaynak.AktivitePenceresiSaniye,
             HareketsizlikUyariSaniyesi = kaynak.HareketsizlikUyariSaniyesi,
+            BosBakisSaniyesi = kaynak.BosBakisSaniyesi,
+            BosBakisCezaPuani = kaynak.BosBakisCezaPuani,
             UyariMesajiNotu = kaynak.UyariMesajiNotu,
             KameraOnizlemeFps = kaynak.KameraOnizlemeFps,
             KameraAnalizFps = kaynak.KameraAnalizFps,

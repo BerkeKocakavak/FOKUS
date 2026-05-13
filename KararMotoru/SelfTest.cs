@@ -86,6 +86,23 @@ public static class SelfTest
         OdakSonucu esnekBakis = new OdakPuaniMotoru().Hesapla(bakisSapmasi, aktifGirdi, normalSurec, esnekBakisAyarlari);
         Dogrula(sikiBakis.Puan < esnekBakis.Puan, "Bakış eşiği ayarı odak puanını değiştirmeli.");
 
+        var bosBakisVerisi = new BiyometrikVeri
+        {
+            YuzVar = true,
+            AnalizHazir = true,
+            KalibrasyonTamam = true,
+            Ear = 0.28,
+            EarEsik = 0.20,
+            GazeSapma = 0,
+            OneSapma = 0,
+            YanaSapma = 0,
+            BosBakis = true,
+            BosBakisSaniye = ayarlar.BosBakisSaniyesi
+        };
+        OdakSonucu bosBakis = new OdakPuaniMotoru().Hesapla(bosBakisVerisi, aktifGirdi, normalSurec, ayarlar);
+        Dogrula(bosBakis.Cezalar.Any(c => c.Kaynak == "Boş bakış"), "Boş bakış bayrağı odak cezası üretmeli.");
+        Dogrula(bosBakis.Puan < normal.Puan, "Boş bakış odak puanını düşürmeli.");
+
         var yuzYok = new BiyometrikVeri
         {
             YuzVar = false,
@@ -109,7 +126,7 @@ public static class SelfTest
         OdakSonucu kalibrasyonSonuc = new OdakPuaniMotoru().Hesapla(kalibrasyon, aktifGirdi, normalSurec, ayarlar);
         Dogrula(kalibrasyonSonuc.Cezalar.Count == 0, "Kalibrasyon sırasında ceza üretilmemeli.");
 
-        VeritabaniSelfTest(normal, normalVeri, aktifGirdi, normalSurec);
+        VeritabaniSelfTest(normal, normalVeri, aktifGirdi, karaListeSureci);
 
         Console.WriteLine("Karar motoru özdenetimi geçti.");
         return 0;
@@ -142,7 +159,10 @@ public static class SelfTest
 
             IReadOnlyList<SessionSummary> summaries = db.GetSessionSummaries(5, 60);
             Dogrula(summaries.Count > 0, "Veritabanı oturum raporu üretmeli.");
+            Dogrula(summaries[0].SessionId == sessionId, "Veritabanı son oturumu tutarlı okumalı.");
             Dogrula(summaries[0].SampleCount > 0, "Veritabanı odak örneği kaydetmeli.");
+            Dogrula(Math.Abs(summaries[0].AverageFocus - odak.Puan) < 0.01, "Veritabanı odak puanını tutarlı okumalı.");
+            Dogrula(summaries[0].BlacklistSamples > 0, "Veritabanı kara liste örneği kaydetmeli.");
 
             DateTimeOffset ikinciBaslangic = DateTimeOffset.Now.AddMinutes(-5);
             db.StartSession("self-test-2", ikinciBaslangic);
@@ -154,6 +174,13 @@ public static class SelfTest
             DashboardSnapshot snapshot = db.GetDashboardSnapshot(1, 60);
             Dogrula(snapshot.Overview.SessionCount >= 3, "İstatistik özeti son oturum limitiyle sınırlanmamalı.");
             Dogrula(snapshot.Overview.TotalDuration.TotalSeconds > 0, "İstatistik özeti oturum süresini toplamalı.");
+            Dogrula(snapshot.Blacklist.Any(item => item.ProcessName.Equals("Discord", StringComparison.OrdinalIgnoreCase) && item.Hits > 0),
+                "Kara liste tablosundan dashboard özeti okunmalı.");
+
+            SessionEndAnalysis? latestAnalysis = db.GetLatestSessionAnalysis(60);
+            Dogrula(latestAnalysis is not null, "Son oturum analizi okunmalı.");
+            Dogrula(latestAnalysis!.Blacklist.Any(item => item.ProcessName.Equals("Discord", StringComparison.OrdinalIgnoreCase) && item.Hits > 0),
+                "Kara liste tablosundan son oturum özeti okunmalı.");
         }
         finally
         {

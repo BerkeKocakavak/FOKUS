@@ -10,7 +10,22 @@ public sealed class SurecYonetici
 
     private static readonly HashSet<string> KritikSurecler = new(StringComparer.OrdinalIgnoreCase)
     {
-        "explorer", "csrss", "wininit", "smss", "services", "lsass", "svchost", "devenv", "KararMotoru"
+        "System",
+        "Registry",
+        "Idle",
+        "csrss",
+        "wininit",
+        "winlogon",
+        "smss",
+        "services",
+        "lsass",
+        "svchost",
+        "dwm",
+        "fontdrvhost",
+        "conhost",
+        "explorer",
+        "devenv",
+        "KararMotoru"
     };
 
     [Flags]
@@ -19,59 +34,76 @@ public sealed class SurecYonetici
         SuspendResume = 0x0002
     }
 
-    public void SurecleriDondur(IEnumerable<string> karaListedekiSurecler)
+    public SurecMudahaleSonucu SurecleriDondur(IEnumerable<string> karaListedekiSurecler)
     {
+        int sayi = 0;
+        var reddedilen = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         lock (_syncRoot)
         {
             foreach (string surecAdi in karaListedekiSurecler)
             {
-                if (KritikSurecler.Contains(surecAdi))
+                string normalizeSurecAdi = NormalizeSurecAdi(surecAdi);
+                if (KritikSurecler.Contains(normalizeSurecAdi))
                 {
+                    reddedilen.Add(normalizeSurecAdi);
                     continue;
                 }
 
-                Process[] processes = Process.GetProcessesByName(surecAdi);
+                Process[] processes = Process.GetProcessesByName(normalizeSurecAdi);
                 foreach (Process process in processes)
                 {
                     SureciDondur(process);
+                    sayi++;
                 }
             }
         }
+
+        return new SurecMudahaleSonucu(sayi, reddedilen.ToArray());
     }
 
-    public void SurecleriDevamEttir(IEnumerable<string> karaListedekiSurecler)
+    public SurecMudahaleSonucu SurecleriDevamEttir(IEnumerable<string> karaListedekiSurecler)
     {
+        int sayi = 0;
+        var reddedilen = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         lock (_syncRoot)
         {
             foreach (string surecAdi in karaListedekiSurecler)
             {
-                if (KritikSurecler.Contains(surecAdi))
+                string normalizeSurecAdi = NormalizeSurecAdi(surecAdi);
+                if (KritikSurecler.Contains(normalizeSurecAdi))
                 {
+                    reddedilen.Add(normalizeSurecAdi);
                     continue;
                 }
 
-                Process[] processes = Process.GetProcessesByName(surecAdi);
+                Process[] processes = Process.GetProcessesByName(normalizeSurecAdi);
                 foreach (Process process in processes)
                 {
                     SureciDevamEttir(process);
+                    sayi++;
                 }
             }
 
             AskidakiBitmisSurecleriTemizle();
         }
+
+        return new SurecMudahaleSonucu(sayi, reddedilen.ToArray());
     }
 
-    public int SurecleriSonlandir(IEnumerable<string> karaListedekiSurecler)
+    public SurecMudahaleSonucu SurecleriSonlandir(IEnumerable<string> karaListedekiSurecler)
     {
         int sayi = 0;
+        var reddedilen = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string surecAdi in karaListedekiSurecler)
         {
-            if (KritikSurecler.Contains(surecAdi))
+            string normalizeSurecAdi = NormalizeSurecAdi(surecAdi);
+            if (KritikSurecler.Contains(normalizeSurecAdi))
             {
+                reddedilen.Add(normalizeSurecAdi);
                 continue;
             }
 
-            Process[] processes = Process.GetProcessesByName(surecAdi);
+            Process[] processes = Process.GetProcessesByName(normalizeSurecAdi);
             foreach (Process process in processes)
             {
                 if (process.HasExited)
@@ -84,7 +116,15 @@ public sealed class SurecYonetici
             }
         }
 
-        return sayi;
+        return new SurecMudahaleSonucu(sayi, reddedilen.ToArray());
+    }
+
+    private static string NormalizeSurecAdi(string surecAdi)
+    {
+        string temiz = surecAdi.Trim();
+        return temiz.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? temiz[..^4]
+            : temiz;
     }
 
     private void SureciDondur(Process process)
@@ -240,4 +280,11 @@ public sealed class SurecYonetici
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+
+public sealed record SurecMudahaleSonucu(
+    int EtkilenenSurecSayisi,
+    IReadOnlyList<string> ReddedilenKritikSurecler)
+{
+    public bool KritikSurecReddedildi => ReddedilenKritikSurecler.Count > 0;
 }

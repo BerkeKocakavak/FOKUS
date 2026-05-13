@@ -52,4 +52,10 @@ public sealed class BiyometrikVeri
     [JsonPropertyName("kamera_bagli")]
     public bool KameraBagli { get; set; } = true;
 
+    [JsonPropertyName("bos_bakis")]
+    public bool BosBakis { get; set; }
+
+    [JsonPropertyName("bos_bakis_saniye")]
+    public double BosBakisSaniye { get; set; }
+
 }

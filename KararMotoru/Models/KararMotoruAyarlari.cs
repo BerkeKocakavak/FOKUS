@@ -16,6 +16,10 @@ public sealed class KararMotoruAyarlari
 
     public int HareketsizlikUyariSaniyesi { get; set; } = 45;
 
+    public int BosBakisSaniyesi { get; set; } = 15;
+
+    public double BosBakisCezaPuani { get; set; } = 15;
+
     public string UyariMesajiNotu { get; set; } = "Kısa bir toparlanma molası verip tekrar odaklan.";
 
     public int KameraOnizlemeFps { get; set; } = 30;
@@ -81,6 +85,8 @@ public sealed class KararMotoruAyarlari
         GirdiOrneklemeMs = Math.Clamp(GirdiOrneklemeMs, 30, 1000);
         AktivitePenceresiSaniye = Math.Clamp(AktivitePenceresiSaniye, 10, 600);
         HareketsizlikUyariSaniyesi = Math.Clamp(HareketsizlikUyariSaniyesi, 5, 3600);
+        BosBakisSaniyesi = Math.Clamp(BosBakisSaniyesi, 5, 120);
+        BosBakisCezaPuani = Math.Clamp(BosBakisCezaPuani, 0, 50);
         UyariMesajiNotu = string.IsNullOrWhiteSpace(UyariMesajiNotu)
             ? "Kısa bir toparlanma molası verip tekrar odaklan."
             : UyariMesajiNotu.Trim();

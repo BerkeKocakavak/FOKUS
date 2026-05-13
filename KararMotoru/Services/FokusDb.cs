@@ -79,6 +79,23 @@ public sealed class FokusDb
                     description TEXT NOT NULL,
                     FOREIGN KEY(sample_id) REFERENCES focus_samples(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS blacklist_detections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sample_id INTEGER NOT NULL,
+                    process_name TEXT NOT NULL,
+                    detected_at TEXT NOT NULL,
+                    intervention_required INTEGER NOT NULL,
+                    intervention_enabled INTEGER NOT NULL,
+                    UNIQUE(sample_id, process_name),
+                    FOREIGN KEY(sample_id) REFERENCES focus_samples(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_blacklist_detections_sample
+                    ON blacklist_detections(sample_id);
+
+                CREATE INDEX IF NOT EXISTS idx_blacklist_detections_process
+                    ON blacklist_detections(process_name);
                 """;
             command.ExecuteNonQuery();
         }
@@ -168,7 +185,7 @@ public sealed class FokusDb
                 command.Parameters.AddWithValue("$ear", biyometrik?.Ear ?? 0);
                 command.Parameters.AddWithValue("$ear_threshold", biyometrik?.EarEsik ?? 0);
                 command.Parameters.AddWithValue("$gaze", biyometrik?.Gaze ?? 0);
-                command.Parameters.AddWithValue("$gaze_deviation", biyometrik?.GazeSapma ?? 0);
+                command.Parameters.AddWithValue("$gaze_deviation", Math.Abs(biyometrik?.GazeSapma ?? 0));
                 command.Parameters.AddWithValue("$gaze_direction", NullIfEmpty(biyometrik?.GazeYon));
                 command.Parameters.AddWithValue("$posture_status", NullIfEmpty(biyometrik?.BasDurum));
                 command.Parameters.AddWithValue("$forward_deviation", biyometrik?.OneSapma ?? 0);
@@ -211,6 +228,31 @@ public sealed class FokusDb
                 penaltyCommand.Parameters.AddWithValue("$value", ceza.Deger);
                 penaltyCommand.Parameters.AddWithValue("$description", ceza.Aciklama);
                 penaltyCommand.ExecuteNonQuery();
+            }
+
+            if (state.Surec is { KaraListedekiSurecler.Count: > 0 } surecSonucu)
+            {
+                foreach (string processName in surecSonucu.KaraListedekiSurecler)
+                {
+                    using var blacklistCommand = connection.CreateCommand();
+                    blacklistCommand.Transaction = transaction;
+                    blacklistCommand.CommandText = """
+                        INSERT OR IGNORE INTO blacklist_detections (
+                            sample_id, process_name, detected_at,
+                            intervention_required, intervention_enabled
+                        )
+                        VALUES (
+                            $sample_id, $process_name, $detected_at,
+                            $intervention_required, $intervention_enabled
+                        );
+                        """;
+                    blacklistCommand.Parameters.AddWithValue("$sample_id", sampleId);
+                    blacklistCommand.Parameters.AddWithValue("$process_name", processName);
+                    blacklistCommand.Parameters.AddWithValue("$detected_at", FormatTime(state.Zaman));
+                    blacklistCommand.Parameters.AddWithValue("$intervention_required", Bool(state.Odak.MudahaleGerekli));
+                    blacklistCommand.Parameters.AddWithValue("$intervention_enabled", Bool(state.MudahaleAktif));
+                    blacklistCommand.ExecuteNonQuery();
+                }
             }
 
             transaction.Commit();
@@ -575,58 +617,48 @@ public sealed class FokusDb
                 ORDER BY COALESCE(ended_at, started_at) DESC
                 LIMIT $session_limit
             )
-            SELECT blacklist_processes
-            FROM focus_samples
-            WHERE session_id IN (SELECT id FROM recent_sessions)
-              AND blacklist_processes <> '';
+            SELECT d.process_name, COUNT(*) AS hits
+            FROM blacklist_detections d
+            INNER JOIN focus_samples f ON f.id = d.sample_id
+            WHERE f.session_id IN (SELECT id FROM recent_sessions)
+            GROUP BY d.process_name
+            ORDER BY hits DESC, d.process_name COLLATE NOCASE
+            LIMIT 8;
             """;
         command.Parameters.AddWithValue("$session_limit", sessionLimit);
 
-        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var items = new List<BlacklistSummary>();
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
         {
-            foreach (string process in reader.GetString(0).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                counts[process] = counts.TryGetValue(process, out int count) ? count + 1 : 1;
-            }
+            items.Add(new BlacklistSummary(reader.GetString(0), reader.GetInt32(1)));
         }
 
-        return counts
-            .OrderByDescending(pair => pair.Value)
-            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-            .Take(8)
-            .Select(pair => new BlacklistSummary(pair.Key, pair.Value))
-            .ToArray();
+        return items;
     }
 
     private static IReadOnlyList<BlacklistSummary> ReadBlacklistBreakdownForSession(SqliteConnection connection, string sessionId)
     {
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT blacklist_processes
-            FROM focus_samples
-            WHERE session_id = $session_id
-              AND blacklist_processes <> '';
+            SELECT d.process_name, COUNT(*) AS hits
+            FROM blacklist_detections d
+            INNER JOIN focus_samples f ON f.id = d.sample_id
+            WHERE f.session_id = $session_id
+            GROUP BY d.process_name
+            ORDER BY hits DESC, d.process_name COLLATE NOCASE
+            LIMIT 8;
             """;
         command.Parameters.AddWithValue("$session_id", sessionId);
 
-        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var items = new List<BlacklistSummary>();
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
         {
-            foreach (string process in reader.GetString(0).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                counts[process] = counts.TryGetValue(process, out int count) ? count + 1 : 1;
-            }
+            items.Add(new BlacklistSummary(reader.GetString(0), reader.GetInt32(1)));
         }
 
-        return counts
-            .OrderByDescending(pair => pair.Value)
-            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-            .Take(8)
-            .Select(pair => new BlacklistSummary(pair.Key, pair.Value))
-            .ToArray();
+        return items;
     }
 
     private static IReadOnlyList<DailyFocusSummary> ReadDailySummaries(SqliteConnection connection, int sessionLimit, int focusThreshold, int dayLimit)

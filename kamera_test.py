@@ -410,6 +410,7 @@ def gaze_hesapla(landmarks, w, h):
 
     return (sol_oran + sag_oran) / 2.0
 
+
 def bas_egimi_hesapla(landmarks, w, h):
     burun = np.array([landmarks[BURUN].x * w, landmarks[BURUN].y * h])
     cene = np.array([landmarks[CENE].x * w, landmarks[CENE].y * h])

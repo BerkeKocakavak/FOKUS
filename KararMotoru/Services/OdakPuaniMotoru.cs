@@ -69,6 +69,13 @@ public sealed class OdakPuaniMotoru
             hedefPuan -= aktiviteCezasi;
         }
 
+        if (veri.BosBakis)
+        {
+            double ceza = Math.Min(ayarlar.BosBakisCezaPuani, Math.Max(0, ayarlar.BosBakisCezaPuani));
+            CezaEkle(cezalar, "Boş bakış", ceza, $"{ayarlar.BosBakisSaniyesi} saniyedir hareketsiz boş bakış algılanıyor.");
+            hedefPuan -= ceza;
+        }
+
         hedefPuan = Math.Clamp(hedefPuan, 0, 100);
         double puruzsuzPuan = ayarlar.EmaAlpha * hedefPuan + (1.0 - ayarlar.EmaAlpha) * _oncekiPuan;
         _oncekiPuan = puruzsuzPuan;
