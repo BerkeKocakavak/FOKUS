@@ -5,42 +5,76 @@ namespace FokusKararMotoru.Services;
 public sealed class MedyaYonetici
 {
     private static readonly TimeSpan KomutZamanAsimi = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan KomutTekrarAraligi = TimeSpan.FromSeconds(2);
+    private readonly object _syncRoot = new();
+    private DateTimeOffset _sonKomutDenemesi = DateTimeOffset.MinValue;
     private bool _bizDuraklattik;
+    private bool _hedefDuraklatildi;
+    private bool _komutCalisiyor;
 
     public void OdakDurumunuUygula(bool odakDusuk)
     {
-        if (odakDusuk)
-        {
-            Duraklat();
-            return;
-        }
-
-        DevamEttir();
+        MedyaDurumunuPlanla(odakDusuk);
     }
 
     public void Duraklat()
     {
-        if (_bizDuraklattik)
-        {
-            return;
-        }
-
-        if (MedyaKomutuGonder(duraklat: true))
-        {
-            _bizDuraklattik = true;
-        }
+        MedyaDurumunuPlanla(true);
     }
 
     public void DevamEttir()
     {
-        if (!_bizDuraklattik)
+        MedyaDurumunuPlanla(false);
+    }
+
+    private void MedyaDurumunuPlanla(bool duraklat)
+    {
+        lock (_syncRoot)
         {
-            return;
+            _hedefDuraklatildi = duraklat;
+            DateTimeOffset simdi = DateTimeOffset.Now;
+            if (_komutCalisiyor || _bizDuraklattik == _hedefDuraklatildi)
+            {
+                return;
+            }
+
+            if (simdi - _sonKomutDenemesi < KomutTekrarAraligi)
+            {
+                return;
+            }
+
+            _sonKomutDenemesi = simdi;
+            _komutCalisiyor = true;
         }
 
-        if (MedyaKomutuGonder(duraklat: false))
+        _ = Task.Run(KomutDongusu);
+    }
+
+    private void KomutDongusu()
+    {
+        while (true)
         {
-            _bizDuraklattik = false;
+            bool hedef;
+            lock (_syncRoot)
+            {
+                hedef = _hedefDuraklatildi;
+            }
+
+            bool basarili = MedyaKomutuGonder(hedef);
+
+            lock (_syncRoot)
+            {
+                if (basarili)
+                {
+                    _bizDuraklattik = hedef;
+                }
+
+                if (_bizDuraklattik == _hedefDuraklatildi || !basarili)
+                {
+                    _komutCalisiyor = false;
+                    return;
+                }
+            }
         }
     }
 

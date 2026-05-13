@@ -29,6 +29,7 @@ public sealed class KararMotoruWorker : IDisposable
     private DateTimeOffset _lastDbWrite = DateTimeOffset.MinValue;
     private string? _sonOtomatikMudahaleHatasi;
     private bool _karaListeAskida;
+    private bool _kameraNedeniyleDuraklatildi;
     private bool _disposed;
 
     public KararMotoruWorker(string projeKoku, KararMotoruAyarlari ayarlar, string pipeName = "fokus_pipe", FokusDb? database = null)
@@ -85,6 +86,12 @@ public sealed class KararMotoruWorker : IDisposable
     public void DuraklatmaDurumuAyarla(bool aktif)
     {
         Duraklatildi = aktif;
+        if (!aktif)
+        {
+            _kameraNedeniyleDuraklatildi = false;
+        }
+
+        _girdiIzleyici?.DuraklatmaDurumuAyarla(aktif);
         string? hata = null;
 
         if (aktif)
@@ -166,6 +173,7 @@ public sealed class KararMotoruWorker : IDisposable
 
         _cancellation = new CancellationTokenSource();
         _girdiIzleyici = new GirdiIzleyici(Ayarlar.GirdiOrneklemeMs);
+        _kameraNedeniyleDuraklatildi = false;
         _sessionId = DateTime.Now.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
         _lastDbWrite = DateTimeOffset.MinValue;
         _database?.EnsureCreated();
@@ -210,6 +218,7 @@ public sealed class KararMotoruWorker : IDisposable
             _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
             _medyaYonetici.DevamEttir();
             _karaListeAskida = false;
+            _kameraNedeniyleDuraklatildi = false;
             _girdiIzleyici?.Dispose();
             _girdiIzleyici = null;
             cancellation.Dispose();
@@ -269,16 +278,10 @@ public sealed class KararMotoruWorker : IDisposable
             }
             catch (IOException ex)
             {
-                _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
-                _karaListeAskida = false;
-                Publish(_sonState with
-                {
-                    PipeBagli = false,
-                    Duraklatildi = Duraklatildi,
-                    MudahaleAktif = MudahaleAktif,
-                    DurumMesaji = "Pipe bağlantısı kesildi",
-                    Hata = ex.Message
-                });
+                KameraSorunuylaDuraklat(
+                    "Kamera/pipe bağlantısı kesildi; sistem duraklatıldı.",
+                    ex.Message,
+                    pipeBagli: false);
                 await Task.Delay(1000, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -313,6 +316,11 @@ public sealed class KararMotoruWorker : IDisposable
             while (client.IsConnected && !cancellationToken.IsCancellationRequested)
             {
                 string? jsonVeri = await reader.ReadLineAsync(cancellationToken);
+                if (jsonVeri is null)
+                {
+                    throw new EndOfStreamException("Pipe veri akışı sonlandı.");
+                }
+
                 if (string.IsNullOrWhiteSpace(jsonVeri))
                 {
                     continue;
@@ -342,6 +350,27 @@ public sealed class KararMotoruWorker : IDisposable
 
         if (veri is null || _girdiIzleyici is null)
         {
+            return;
+        }
+
+        if (KameraSorunuVar(veri, paketZamani, out string kameraMesaji))
+        {
+            KameraSorunuylaDuraklat(kameraMesaji, kameraMesaji, pipeBagli: true, veri);
+            return;
+        }
+
+        if (_kameraNedeniyleDuraklatildi && Duraklatildi)
+        {
+            Publish(new KararMotoruState
+            {
+                Zaman = paketZamani,
+                PipeBagli = true,
+                Duraklatildi = true,
+                MudahaleAktif = false,
+                DurumMesaji = "Kamera yeniden bağlandı; devam etmek için Devam et'e bas.",
+                Biyometrik = veri,
+                Girdi = _girdiIzleyici.OzetAl(Ayarlar.AktivitePenceresiSaniye)
+            });
             return;
         }
 
@@ -383,6 +412,58 @@ public sealed class KararMotoruWorker : IDisposable
 
         VeritabaniKaydiYaz(state);
         Publish(state);
+    }
+
+    private bool KameraSorunuVar(BiyometrikVeri veri, DateTimeOffset paketZamani, out string mesaj)
+    {
+        if (!veri.KameraBagli)
+        {
+            mesaj = "Kamera bağlantısı kesildi; sistem duraklatıldı.";
+            return true;
+        }
+
+        if (!veri.AnalizHazir &&
+            veri.AnalizDurumu?.Contains("kamera", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            mesaj = "Kamera analizi durdu; sistem duraklatıldı.";
+            return true;
+        }
+
+        mesaj = string.Empty;
+        return false;
+    }
+
+    private void KameraSorunuylaDuraklat(string durumMesaji, string? hata, bool pipeBagli, BiyometrikVeri? veri = null)
+    {
+        Duraklatildi = true;
+        _kameraNedeniyleDuraklatildi = true;
+        _girdiIzleyici?.DuraklatmaDurumuAyarla(true);
+
+        string? hataMesaji = hata;
+        try
+        {
+            _surecYonetici.SurecleriDevamEttir(Ayarlar.KaraListe);
+            _medyaYonetici.DevamEttir();
+            _karaListeAskida = false;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            hataMesaji = string.IsNullOrWhiteSpace(hataMesaji)
+                ? "Duraklatılırken süreçler devam ettirilemedi: " + ex.Message
+                : hataMesaji + " | Duraklatma temizliği: " + ex.Message;
+        }
+
+        Publish(new KararMotoruState
+        {
+            Zaman = DateTimeOffset.Now,
+            PipeBagli = pipeBagli,
+            Duraklatildi = true,
+            MudahaleAktif = false,
+            DurumMesaji = durumMesaji,
+            Biyometrik = veri,
+            Girdi = _girdiIzleyici?.OzetAl(Ayarlar.AktivitePenceresiSaniye),
+            Hata = hataMesaji
+        });
     }
 
     private void SetActivePipe(NamedPipeClientStream client)
@@ -469,7 +550,7 @@ public sealed class KararMotoruWorker : IDisposable
             {
                 lock (_hataSyncRoot)
                 {
-                    _sonOtomatikMudahaleHatasi = "MÃ¼dahale hatasÄ±: " + ex.Message;
+                    _sonOtomatikMudahaleHatasi = "Müdahale hatası: " + ex.Message;
                 }
             }
             finally

@@ -49,4 +49,7 @@ public sealed class BiyometrikVeri
     [JsonPropertyName("analiz_durumu")]
     public string? AnalizDurumu { get; set; }
 
+    [JsonPropertyName("kamera_bagli")]
+    public bool KameraBagli { get; set; } = true;
+
 }

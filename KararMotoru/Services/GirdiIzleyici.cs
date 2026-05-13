@@ -7,11 +7,17 @@ public sealed class GirdiIzleyici : IDisposable
 {
     private readonly object _kilit = new();
     private readonly Timer _timer;
+    private readonly DateTimeOffset _oturumBaslangic = DateTimeOffset.Now;
     private readonly bool[] _oncekiTusDurumlari = new bool[256];
     private readonly Queue<DateTimeOffset> _tusOlaylari = new();
     private readonly Queue<(DateTimeOffset Zaman, double Mesafe)> _fareOlaylari = new();
     private DateTimeOffset _sonAktivite = DateTimeOffset.Now;
+    private DateTimeOffset? _duraklatmaBaslangic;
     private Point? _oncekiFareKonumu;
+    private int _toplamTusVurusu;
+    private double _toplamFareMesafesi;
+    private TimeSpan _duraklatilanSure = TimeSpan.Zero;
+    private bool _duraklatildi;
     private bool _disposed;
 
     public GirdiIzleyici(int orneklemeMs)
@@ -28,7 +34,7 @@ public sealed class GirdiIzleyici : IDisposable
         {
             PencereDisiOlaylariTemizle(baslangic);
             double fareMesafesi = _fareOlaylari.Sum(olay => olay.Mesafe);
-            double dakikaCarpani = 60.0 / Math.Max(1, pencereSaniye);
+            double oturumDakika = Math.Max(1.0 / 60.0, AktifOturumSuresi(simdi).TotalMinutes);
 
             return new GirdiAktiviteOzeti
             {
@@ -37,9 +43,35 @@ public sealed class GirdiIzleyici : IDisposable
                 FareHareketi = _fareOlaylari.Count,
                 FareMesafesi = fareMesafesi,
                 HareketsizSaniye = Math.Max(0, (simdi - _sonAktivite).TotalSeconds),
-                TusDakika = _tusOlaylari.Count * dakikaCarpani,
-                FarePikselDakika = fareMesafesi * dakikaCarpani
+                TusDakika = _toplamTusVurusu / oturumDakika,
+                FarePikselDakika = _toplamFareMesafesi / oturumDakika
             };
+        }
+    }
+
+    public void DuraklatmaDurumuAyarla(bool aktif)
+    {
+        DateTimeOffset simdi = DateTimeOffset.Now;
+        lock (_kilit)
+        {
+            if (_duraklatildi == aktif)
+            {
+                return;
+            }
+
+            _duraklatildi = aktif;
+            if (aktif)
+            {
+                _duraklatmaBaslangic = simdi;
+            }
+            else if (_duraklatmaBaslangic is DateTimeOffset baslangic)
+            {
+                _duraklatilanSure += simdi - baslangic;
+                _duraklatmaBaslangic = null;
+                _sonAktivite = simdi;
+                Array.Clear(_oncekiTusDurumlari);
+                _oncekiFareKonumu = null;
+            }
         }
     }
 
@@ -64,6 +96,13 @@ public sealed class GirdiIzleyici : IDisposable
         DateTimeOffset simdi = DateTimeOffset.Now;
         lock (_kilit)
         {
+            if (_duraklatildi)
+            {
+                Array.Clear(_oncekiTusDurumlari);
+                _oncekiFareKonumu = null;
+                return;
+            }
+
             for (int tus = 8; tus < _oncekiTusDurumlari.Length; tus++)
             {
                 short durum = GetAsyncKeyState(tus);
@@ -72,6 +111,7 @@ public sealed class GirdiIzleyici : IDisposable
                 if (yeniBasma)
                 {
                     _tusOlaylari.Enqueue(simdi);
+                    _toplamTusVurusu++;
                     _sonAktivite = simdi;
                 }
 
@@ -86,6 +126,7 @@ public sealed class GirdiIzleyici : IDisposable
                     if (mesafe >= 2)
                     {
                         _fareOlaylari.Enqueue((simdi, mesafe));
+                        _toplamFareMesafesi += mesafe;
                         _sonAktivite = simdi;
                     }
                 }
@@ -93,6 +134,18 @@ public sealed class GirdiIzleyici : IDisposable
                 _oncekiFareKonumu = konum;
             }
         }
+    }
+
+    private TimeSpan AktifOturumSuresi(DateTimeOffset simdi)
+    {
+        TimeSpan duraklama = _duraklatilanSure;
+        if (_duraklatmaBaslangic is DateTimeOffset baslangic)
+        {
+            duraklama += simdi - baslangic;
+        }
+
+        TimeSpan sure = simdi - _oturumBaslangic - duraklama;
+        return sure > TimeSpan.Zero ? sure : TimeSpan.Zero;
     }
 
     private void PencereDisiOlaylariTemizle(DateTimeOffset baslangic)

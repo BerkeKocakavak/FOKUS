@@ -25,6 +25,8 @@ SAG_KULAK = 454
 
 KIRPMA_KARE = 2
 KALIBRASYON_SURE = 3
+KALIBRASYON_MIN_ORNEK = 12
+KALIBRASYON_MIN_EAR = 0.16
 PIPE_ADI = r'\\.\pipe\fokus_pipe'
 FRAME_PIPE_ADI = None
 KOK_DIZIN = os.path.dirname(os.path.abspath(__file__))
@@ -37,8 +39,10 @@ MODEL_ASSET_PATH = os.path.join("modeller", "face_landmarker.task")
 HEADLESS = False
 FRAME_INTERVAL = 1 / 30
 ANALIZ_INTERVAL = 1 / 10
+KAMERA_YENIDEN_DENEME_ARALIGI = 0.5
 son_frame_yazma = 0.0
 son_analiz_zamani = 0.0
+son_kamera_log_zamani = 0.0
 son_result = None
 detector = None
 detector_hazir = False
@@ -53,6 +57,7 @@ ref_ear = None
 ref_gaze = None
 ref_one = None
 ref_yana = None
+ref_gaze_esik = 0.02
 
 kirpma_sayaci = 0
 toplam_kirpma = 0
@@ -61,7 +66,8 @@ kal_ear_listesi = []
 kal_gaze_listesi = []
 kal_one_listesi = []
 kal_yana_listesi = []
-kal_baslangic = None
+kal_gecerli_sure = 0.0
+kal_son_ornek_zamani = None
 
 # Paylaşılan veri
 paylasilan_veri = {}
@@ -344,6 +350,38 @@ def frame_pipe_sunucusu():
                     pass
             time.sleep(0.5)
 
+
+def kamera_ac():
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    if cap.isOpened():
+        return cap
+
+    cap.release()
+    return None
+
+
+def kamera_durumunu_yayimla(mesaj):
+    global son_result
+    son_result = None
+    with veri_kilidi:
+        paylasilan_veri.update({
+            "zaman": time.time(),
+            "kamera_bagli": False,
+            "yuz_var": False,
+            "analiz_hazir": False,
+            "analiz_durumu": mesaj,
+            "kalibrasyon_tamam": kalibrasyon_tamam,
+            "kalibrasyon_kalan_saniye": 0,
+            "gaze_yon": "YOK",
+            "bas_durum": "YOK"
+        })
+
+
 def ear_hesapla(landmarks, goz_noktalari, w, h):
     nokta = lambda i: np.array([landmarks[i].x * w, landmarks[i].y * h])
     p1, p2, p3, p4, p5, p6 = [nokta(i) for i in goz_noktalari]
@@ -385,6 +423,76 @@ def bas_egimi_hesapla(landmarks, w, h):
 
     return one_egim, yana_egim
 
+
+def landmark_noktasi(landmark, w, h, aynali=True):
+    x = (1.0 - landmark.x) * w if aynali else landmark.x * w
+    y = landmark.y * h
+    return int(np.clip(x, 0, w - 1)), int(np.clip(y, 0, h - 1))
+
+
+def landmark_cizgisi_ciz(frame, landmarks, noktalar, w, h, renk, kapali=False, kalinlik=1):
+    pts = np.array([landmark_noktasi(landmarks[i], w, h) for i in noktalar], dtype=np.int32)
+    cv2.polylines(frame, [pts], kapali, renk, kalinlik, cv2.LINE_AA)
+
+
+def kalibrasyon_cizimleri_ciz(frame, landmarks, w, h, uygun):
+    nokta_renk = (80, 180, 255) if uygun else (0, 180, 255)
+    ana_renk = (0, 220, 120) if uygun else (0, 200, 255)
+
+    tum_noktalar = np.array(
+        [landmark_noktasi(landmark, w, h) for landmark in landmarks],
+        dtype=np.int32
+    )
+    if len(tum_noktalar) >= 3:
+        hull = cv2.convexHull(tum_noktalar)
+        cv2.polylines(frame, [hull], True, ana_renk, 2, cv2.LINE_AA)
+
+    for i in range(0, len(landmarks), 6):
+        cv2.circle(frame, landmark_noktasi(landmarks[i], w, h), 1, nokta_renk, -1, cv2.LINE_AA)
+
+    landmark_cizgisi_ciz(frame, landmarks, SOL_GOZ, w, h, (0, 255, 255), kapali=True, kalinlik=2)
+    landmark_cizgisi_ciz(frame, landmarks, SAG_GOZ, w, h, (0, 255, 255), kapali=True, kalinlik=2)
+    landmark_cizgisi_ciz(frame, landmarks, SOL_IRIS, w, h, (255, 180, 0), kapali=True, kalinlik=2)
+    landmark_cizgisi_ciz(frame, landmarks, SAG_IRIS, w, h, (255, 180, 0), kapali=True, kalinlik=2)
+
+    for i in SOL_GOZ + SAG_GOZ + SOL_IRIS + SAG_IRIS:
+        cv2.circle(frame, landmark_noktasi(landmarks[i], w, h), 3, (0, 255, 255), -1, cv2.LINE_AA)
+
+    landmark_cizgisi_ciz(frame, landmarks, [ALIN, BURUN, CENE], w, h, (255, 255, 255), kalinlik=2)
+    landmark_cizgisi_ciz(frame, landmarks, [SOL_KULAK, BURUN, SAG_KULAK], w, h, (255, 255, 255), kalinlik=2)
+    cv2.circle(frame, landmark_noktasi(landmarks[BURUN], w, h), 4, (0, 0, 255), -1, cv2.LINE_AA)
+
+
+def kalibrasyon_kalitesi(landmarks, w, h, ear, one_egim, yana_egim):
+    xs = np.array([landmark.x * w for landmark in landmarks])
+    ys = np.array([landmark.y * h for landmark in landmarks])
+    yuz_genislik = float(xs.max() - xs.min())
+    yuz_yukseklik = float(ys.max() - ys.min())
+    merkez_x = float((xs.max() + xs.min()) / 2.0)
+    merkez_y = float((ys.max() + ys.min()) / 2.0)
+
+    if yuz_genislik < w * 0.18 or yuz_yukseklik < h * 0.24:
+        return False, "Yuzunu kameraya biraz yaklastir"
+
+    if merkez_x < w * 0.30 or merkez_x > w * 0.70 or merkez_y < h * 0.20 or merkez_y > h * 0.82:
+        return False, "Yuzunu kadrajin ortasina al"
+
+    if ear < KALIBRASYON_MIN_EAR:
+        return False, "Gozlerini acik tut"
+
+    if abs(yana_egim) > yuz_yukseklik * 0.16:
+        return False, "Basini yana egme"
+
+    if abs(one_egim) > yuz_yukseklik * 0.30:
+        return False, "Basini dik tut"
+
+    return True, "Uygun"
+
+
+def kalibrasyon_medyani(degerler, varsayilan=0.0):
+    return float(np.median(degerler)) if degerler else varsayilan
+
+
 # Önce kütüphaneyi kur
 try:
     import win32pipe
@@ -416,13 +524,10 @@ if FRAME_PIPE_ADI:
     frame_pipe_thread = threading.Thread(target=frame_pipe_sunucusu, daemon=True)
     frame_pipe_thread.start()
 
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == "nt" else cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-cap.set(cv2.CAP_PROP_FPS, 30)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-if not cap.isOpened():
+cap = kamera_ac()
+if cap is None:
     print("Kamera acilamadi. Kamera izinlerini ve baska uygulama kullanip kullanmadigini kontrol edin.")
+    kamera_durumunu_yayimla("Kamera acilamadi")
 
 model_thread = threading.Thread(target=analiz_modelini_yukle, daemon=True)
 model_thread.start()
@@ -430,17 +535,41 @@ model_thread.start()
 karar_motoru_baslat()
 
 while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    if cap is None:
+        kamera_durumunu_yayimla("Kamera baglantisi yok")
+        time.sleep(KAMERA_YENIDEN_DENEME_ARALIGI)
+        cap = kamera_ac()
+        if cap is not None:
+            print("Kamera yeniden baglandi.")
+        continue
+
+    try:
+        ret, frame = cap.read()
+    except cv2.error as e:
+        ret, frame = False, None
+        if time.time() - son_kamera_log_zamani >= 1:
+            print(f"Kamera okuma hatasi: {e}")
+            son_kamera_log_zamani = time.time()
+
+    if not ret or frame is None:
+        if time.time() - son_kamera_log_zamani >= 1:
+            print("Kamera baglantisi koptu, yeniden baglanma deneniyor...")
+            son_kamera_log_zamani = time.time()
+        kamera_durumunu_yayimla("Kamera baglantisi koptu")
+        cap.release()
+        cap = None
+        time.sleep(KAMERA_YENIDEN_DENEME_ARALIGI)
+        continue
 
     h, w, _ = frame.shape
     simdi = time.time()
+    analiz_yeni = False
     if detector_hazir and detector is not None and simdi - son_analiz_zamani >= ANALIZ_INTERVAL:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         son_result = detector.detect(mp_image)
         son_analiz_zamani = simdi
+        analiz_yeni = True
 
     result = son_result
     frame = cv2.flip(frame, 1)
@@ -452,6 +581,7 @@ while True:
         with veri_kilidi:
             paylasilan_veri.update({
                 "zaman": time.time(),
+                "kamera_bagli": True,
                 "yuz_var": False,
                 "analiz_hazir": False,
                 "analiz_durumu": mesaj,
@@ -469,27 +599,41 @@ while True:
         one_egim, yana_egim = bas_egimi_hesapla(landmarks, w, h)
 
         if not kalibrasyon_tamam:
-            if kal_baslangic is None:
-                kal_baslangic = time.time()
+            uygun, kalite_mesaj = kalibrasyon_kalitesi(landmarks, w, h, ear, one_egim, yana_egim)
+            kalibrasyon_cizimleri_ciz(frame, landmarks, w, h, uygun)
 
-            gecen = time.time() - kal_baslangic
-            kalan = int(KALIBRASYON_SURE - gecen) + 1
+            if analiz_yeni and uygun:
+                if kal_son_ornek_zamani is None:
+                    kal_son_ornek_zamani = simdi
 
-            kal_ear_listesi.append(ear)
-            kal_gaze_listesi.append(gaze)
-            kal_one_listesi.append(one_egim)
-            kal_yana_listesi.append(yana_egim)
+                gecen = min(max(simdi - kal_son_ornek_zamani, 0.0), 0.25)
+                kal_son_ornek_zamani = simdi
+                kal_gecerli_sure += gecen
+                kal_ear_listesi.append(ear)
+                kal_gaze_listesi.append(gaze)
+                kal_one_listesi.append(one_egim)
+                kal_yana_listesi.append(yana_egim)
+            elif analiz_yeni:
+                kal_son_ornek_zamani = None
+
+            kalan = int(np.ceil(max(KALIBRASYON_SURE - kal_gecerli_sure, 0.0)))
+            gerekli_ornek = max(3, min(KALIBRASYON_MIN_ORNEK, int((KALIBRASYON_SURE / ANALIZ_INTERVAL) * 0.6)))
+            durum_metni = "Duz oturun, ekrana bakin" if uygun else kalite_mesaj
+            durum_renk = (0, 255, 0) if uygun else (0, 200, 255)
 
             cv2.putText(frame, "KALIBRASYON", (w // 2 - 120, h // 2 - 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
-            cv2.putText(frame, "Duz oturun, ekrana bakin", (w // 2 - 190, h // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            cv2.putText(frame, durum_metni, (w // 2 - 230, h // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.72, durum_renk, 2)
             cv2.putText(frame, f"{max(kalan, 0)} saniye", (w // 2 - 70, h // 2 + 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+            cv2.putText(frame, f"Ornek: {len(kal_ear_listesi)}/{gerekli_ornek}", (24, 34),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
 
             with veri_kilidi:
                 paylasilan_veri.update({
                     "zaman": time.time(),
+                    "kamera_bagli": True,
                     "ear": round(ear, 3),
                     "ear_esik": round(ref_ear * 0.75 if ref_ear else 0, 3),
                     "gaze": round(gaze, 3),
@@ -501,18 +645,20 @@ while True:
                     "gaze_yon": "KALIBRASYON",
                     "bas_durum": "KALIBRASYON",
                     "analiz_hazir": True,
-                    "analiz_durumu": "Kalibrasyon",
+                    "analiz_durumu": "Kalibrasyon" if uygun else "Kalibrasyon bekliyor: " + kalite_mesaj,
                     "kalibrasyon_tamam": False,
                     "kalibrasyon_kalan_saniye": max(kalan, 0)
                 })
 
-            if gecen >= KALIBRASYON_SURE:
-                ref_ear = np.mean(kal_ear_listesi)
-                ref_gaze = np.mean(kal_gaze_listesi)
-                ref_one = np.mean(kal_one_listesi)
-                ref_yana = np.mean(kal_yana_listesi)
+            if kal_gecerli_sure >= KALIBRASYON_SURE and len(kal_ear_listesi) >= gerekli_ornek:
+                ref_ear = kalibrasyon_medyani(kal_ear_listesi)
+                ref_gaze = kalibrasyon_medyani(kal_gaze_listesi)
+                ref_one = kalibrasyon_medyani(kal_one_listesi)
+                ref_yana = kalibrasyon_medyani(kal_yana_listesi)
+                gaze_std = float(np.std(kal_gaze_listesi)) if len(kal_gaze_listesi) > 1 else 0.0
+                ref_gaze_esik = float(np.clip(max(0.015, gaze_std * 3.0), 0.015, 0.06))
                 kalibrasyon_tamam = True
-                print(f"Kalibrasyon tamam! EAR:{ref_ear:.2f} Gaze:{ref_gaze:.2f}")
+                print(f"Kalibrasyon tamam! EAR:{ref_ear:.2f} Gaze:{ref_gaze:.2f} GazeEsik:{ref_gaze_esik:.3f} Ornek:{len(kal_ear_listesi)}")
 
         else:
             ear_esik = ref_ear * 0.75
@@ -525,9 +671,9 @@ while True:
                 kirpma_sayaci = 0
 
             gaze_sapma = gaze - ref_gaze
-            if gaze_sapma > 0.02:
+            if gaze_sapma > ref_gaze_esik:
                 gaze_yon = "SOLA BAKIYOR"
-            elif gaze_sapma < -0.02:
+            elif gaze_sapma < -ref_gaze_esik:
                 gaze_yon = "SAGA BAKIYOR"
             else:
                 gaze_yon = "MERKEZE BAKIYOR"
@@ -550,6 +696,7 @@ while True:
             with veri_kilidi:
                 paylasilan_veri.update({
                     "zaman": time.time(),
+                    "kamera_bagli": True,
                     "ear": round(ear, 3),
                     "ear_esik": round(ear_esik, 3),
                     "gaze": round(gaze, 3),
@@ -567,14 +714,25 @@ while True:
                 })
 
     else:
+        if not kalibrasyon_tamam:
+            kal_son_ornek_zamani = None
+            kalan = int(np.ceil(max(KALIBRASYON_SURE - kal_gecerli_sure, 0.0)))
+            cv2.putText(frame, "KALIBRASYON", (w // 2 - 120, h // 2 - 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+            cv2.putText(frame, "Yuz bulunamadi", (w // 2 - 140, h // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+            cv2.putText(frame, f"{max(kalan, 0)} saniye", (w // 2 - 70, h // 2 + 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+
         with veri_kilidi:
             paylasilan_veri.update({
                 "yuz_var": False,
                 "zaman": time.time(),
+                "kamera_bagli": True,
                 "analiz_hazir": True,
-                "analiz_durumu": "Yuz bulunamadi",
+                "analiz_durumu": "Kalibrasyon bekliyor: Yuz bulunamadi" if not kalibrasyon_tamam else "Yuz bulunamadi",
                 "kalibrasyon_tamam": kalibrasyon_tamam,
-                "kalibrasyon_kalan_saniye": 0,
+                "kalibrasyon_kalan_saniye": max(kalan, 0) if not kalibrasyon_tamam else 0,
                 "gaze_yon": "YOK",
                 "bas_durum": "YOK"
             })
@@ -586,7 +744,8 @@ while True:
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-cap.release()
+if cap is not None:
+    cap.release()
 if not HEADLESS:
     cv2.destroyAllWindows()
 karar_motoru_durdur()

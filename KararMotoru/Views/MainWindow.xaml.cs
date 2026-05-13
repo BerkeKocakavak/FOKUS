@@ -29,7 +29,11 @@ public partial class MainWindow : Window
     private DateTimeOffset? _lastStateTime;
     private DateTimeOffset? _pauseStartedAt;
     private DateTimeOffset? _uykuBaslangic;
+    private DateTimeOffset? _bosBakisBaslangic;
+    private DateTimeOffset _sonCalisiyorMusunCevapZamani = DateTimeOffset.MinValue;
+    private DateTimeOffset _sonKameraYenidenBaslatma = DateTimeOffset.MinValue;
     private FocusAlertWindow? _uyariPenceresi;
+    private WorkCheckWindow? _calisiyorMusunPenceresi;
     private FocusOverlayWindow? _overlayWindow;
     private DashboardWindow? _dashboardWindow;
     private SessionAnalysisWindow? _sessionAnalysisWindow;
@@ -46,6 +50,7 @@ public partial class MainWindow : Window
     private bool _bagimlilikKontroluGecti;
     private bool _duraklatildi;
     private bool _kameraOnizlemeAktif;
+    private bool _kameraYenidenBaslatiliyor;
     private string _sonHata = "Yok";
 
     public MainWindow()
@@ -107,6 +112,7 @@ public partial class MainWindow : Window
         _kameraOnizlemeAktif = false;
         KamerayiTemizle();
         _uyariPenceresi?.Close();
+        _calisiyorMusunPenceresi?.Close();
         _overlayWindow?.Close();
         _dashboardWindow?.Close();
         _sessionAnalysisWindow?.Close();
@@ -115,6 +121,7 @@ public partial class MainWindow : Window
         _dashboardWindow = null;
         _sessionAnalysisWindow = null;
         _settingsWindow = null;
+        _calisiyorMusunPenceresi = null;
 
         try
         {
@@ -294,6 +301,12 @@ public partial class MainWindow : Window
 
     private void DurumuGoster(KararMotoruState state)
     {
+        if (KameraBaglantisiSorunlu(state))
+        {
+            KamerayiTemizle();
+            KameraKopmasindanSonraToparlan(state);
+        }
+
         if (state.Duraklatildi)
         {
             DuraklatmaUiGuncelle(true);
@@ -563,18 +576,42 @@ public partial class MainWindow : Window
             _uykuBaslangic = null;
         }
 
-        bool bosBakis = biyometrik?.YuzVar == true &&
+        bool gozAcik = biyometrik is not null &&
+            (biyometrik.EarEsik <= 0 ||
+             biyometrik.Ear <= 0 ||
+             biyometrik.Ear >= biyometrik.EarEsik);
+        bool bakisMerkezde = biyometrik?.YuzVar == true &&
+            biyometrik.AnalizHazir &&
             biyometrik.KalibrasyonTamam &&
-            Math.Abs(biyometrik.GazeSapma) <= Math.Max(_ayarlar.GazeEsigi, 0.015) &&
-            (state.Girdi?.HareketsizSaniye ?? 0) >= 15;
+            Math.Abs(biyometrik.GazeSapma) <= Math.Max(_ayarlar.GazeEsigi, 0.015);
+        bool basDuzgun = biyometrik is not null &&
+            Math.Sqrt(Math.Pow(biyometrik.OneSapma, 2) + Math.Pow(biyometrik.YanaSapma, 2)) <= Math.Max(_ayarlar.PosturEsigi, 8);
+        bool girdiYok = (state.Girdi?.HareketsizSaniye ?? 0) >= 1;
+        bool bosBakis = bakisMerkezde && basDuzgun && gozAcik && girdiYok;
 
         if (bosBakis)
         {
-            UyariGoster(
-                "bos-bakis",
-                "Boş bakış uyarısı",
-                "15 saniyedir ekrana bakıyorsun ama klavye/fare aktivitesi görünmüyor.",
-                TimeSpan.FromSeconds(30));
+            _bosBakisBaslangic ??= state.Zaman;
+            if (state.Zaman - _bosBakisBaslangic.Value >= TimeSpan.FromSeconds(15))
+            {
+                UyariGoster(
+                    "bos-bakis",
+                    "Boş bakış uyarısı",
+                    "15 saniyedir ekrana boş bakıyor gibi görünüyorsun.",
+                    TimeSpan.Zero);
+                _bosBakisBaslangic = state.Zaman;
+            }
+        }
+        else
+        {
+            _bosBakisBaslangic = null;
+        }
+
+        if ((state.Girdi?.HareketsizSaniye ?? 0) >= 240 &&
+            _calisiyorMusunPenceresi is null &&
+            DateTimeOffset.Now - _sonCalisiyorMusunCevapZamani >= TimeSpan.FromMinutes(4))
+        {
+            CalisiyorMusunSor();
         }
     }
 
@@ -595,6 +632,32 @@ public partial class MainWindow : Window
         _uyariPenceresi = new FocusAlertWindow(baslik, mesaj, _ayarlar.UyariMesajiNotu);
         _uyariPenceresi.Closed += (_, _) => _uyariPenceresi = null;
         _uyariPenceresi.Show();
+    }
+
+    private void CalisiyorMusunSor()
+    {
+        if (_kapaniyor || _calisiyorMusunPenceresi is not null)
+        {
+            return;
+        }
+
+        _sonUyariZamani = DateTimeOffset.Now;
+        LastAlertText.Text = $"{_sonUyariZamani:HH:mm:ss} - Çalışıyor musun?";
+        SesliUyariCal();
+
+        _calisiyorMusunPenceresi = new WorkCheckWindow();
+        _calisiyorMusunPenceresi.Answered += (_, devam) =>
+        {
+            _sonCalisiyorMusunCevapZamani = DateTimeOffset.Now;
+            if (!devam && !_duraklatildi)
+            {
+                DuraklatmaUiGuncelle(true);
+                _kararMotoruWorker.DuraklatmaDurumuAyarla(true);
+                StatusText.Text = "Ara verme modu aktif.";
+            }
+        };
+        _calisiyorMusunPenceresi.Closed += (_, _) => _calisiyorMusunPenceresi = null;
+        _calisiyorMusunPenceresi.Show();
     }
 
     private static void SesliUyariCal()
@@ -684,6 +747,58 @@ public partial class MainWindow : Window
             : (Brush)FindResource("AccentBrush");
     }
 
+    private static bool KameraBaglantisiSorunlu(KararMotoruState state)
+    {
+        if (state.Biyometrik?.KameraBagli == false)
+        {
+            return true;
+        }
+
+        return state.DurumMesaji.Contains("Kamera", StringComparison.OrdinalIgnoreCase) &&
+            (state.DurumMesaji.Contains("bağlant", StringComparison.OrdinalIgnoreCase) ||
+             state.DurumMesaji.Contains("verisi", StringComparison.OrdinalIgnoreCase) ||
+             state.DurumMesaji.Contains("analizi", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void KameraKopmasindanSonraToparlan(KararMotoruState state)
+    {
+        bool pipeKoptu = !state.PipeBagli &&
+            state.DurumMesaji.Contains("pipe", StringComparison.OrdinalIgnoreCase);
+        if (!pipeKoptu ||
+            !_kameraOnizlemeAktif ||
+            _kapaniyor ||
+            _kameraYenidenBaslatiliyor ||
+            DateTimeOffset.Now - _sonKameraYenidenBaslatma < TimeSpan.FromSeconds(5))
+        {
+            return;
+        }
+
+        _ = KameraIscisiniYenidenBaslatAsync();
+    }
+
+    private async Task KameraIscisiniYenidenBaslatAsync()
+    {
+        _kameraYenidenBaslatiliyor = true;
+        _sonKameraYenidenBaslatma = DateTimeOffset.Now;
+
+        try
+        {
+            await _pythonCameraWorker.StopAsync(TimeSpan.FromSeconds(1));
+            if (!_kapaniyor && _kameraOnizlemeAktif)
+            {
+                _pythonCameraWorker.Start();
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            HataGoster("Kamera yeniden başlatılamadı: " + ex.Message);
+        }
+        finally
+        {
+            _kameraYenidenBaslatiliyor = false;
+        }
+    }
+
     private void OturumSayaclariniSifirla()
     {
         _sessionStart = DateTimeOffset.Now;
@@ -696,6 +811,10 @@ public partial class MainWindow : Window
         _lowFocusSeconds = 0;
         _pausedDuration = TimeSpan.Zero;
         _uykuBaslangic = null;
+        _bosBakisBaslangic = null;
+        _sonCalisiyorMusunCevapZamani = DateTimeOffset.MinValue;
+        _calisiyorMusunPenceresi?.Close();
+        _calisiyorMusunPenceresi = null;
         _odakGecmisi.Clear();
         OdakGecmisiniCiz();
         DetayOturumunuGuncelle();
